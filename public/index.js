@@ -1,0 +1,1356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>SubtitleAI — Powered by Groq Whisper</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #080b12;
+    --surface: #0e1420;
+    --surface2: #151c2e;
+    --border: #1e2a42;
+    --accent: #4f8aff;
+    --accent2: #a259ff;
+    --accent3: #00e5b0;
+    --text: #e8edf8;
+    --text2: #8a96b0;
+    --danger: #ff4f6e;
+    --warn: #ffb347;
+    --radius: 14px;
+    --glow: 0 0 40px rgba(79,138,255,0.12);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* BG GRID */
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image:
+      linear-gradient(rgba(79,138,255,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(79,138,255,0.03) 1px, transparent 1px);
+    background-size: 48px 48px;
+    pointer-events: none; z-index: 0;
+  }
+
+  /* ─── HEADER ─── */
+  header {
+    position: relative; z-index: 10;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 20px 40px;
+    border-bottom: 1px solid var(--border);
+    backdrop-filter: blur(20px);
+    background: rgba(8,11,18,0.85);
+  }
+  .logo {
+    font-family: 'Syne', sans-serif;
+    font-weight: 800; font-size: 1.4rem;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    letter-spacing: -0.5px;
+  }
+  .logo span { color: var(--accent3); -webkit-text-fill-color: var(--accent3); }
+  .badge {
+    font-size: 0.72rem; padding: 4px 10px;
+    background: linear-gradient(135deg, rgba(79,138,255,0.15), rgba(162,89,255,0.15));
+    border: 1px solid rgba(79,138,255,0.3);
+    border-radius: 999px; color: var(--accent);
+    font-family: 'Syne', sans-serif; font-weight: 600; letter-spacing: 0.5px;
+  }
+
+  /* ─── MAIN LAYOUT ─── */
+  main {
+    position: relative; z-index: 1;
+    max-width: 1400px; margin: 0 auto;
+    padding: 32px 32px 80px;
+  }
+
+  /* ─── HERO ─── */
+  .hero {
+    text-align: center;
+    padding: 48px 0 40px;
+  }
+  .hero h1 {
+    font-family: 'Syne', sans-serif;
+    font-size: clamp(2.4rem, 5vw, 4rem);
+    font-weight: 800; line-height: 1.1;
+    letter-spacing: -1.5px;
+    background: linear-gradient(135deg, #fff 30%, var(--accent) 70%, var(--accent2));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    margin-bottom: 16px;
+  }
+  .hero p {
+    color: var(--text2); font-size: 1.05rem; max-width: 520px; margin: 0 auto 32px;
+    line-height: 1.7;
+  }
+  .features-row {
+    display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin-bottom: 8px;
+  }
+  .feat-pill {
+    display: flex; align-items: center; gap: 6px;
+    padding: 6px 14px; border-radius: 999px;
+    background: var(--surface2); border: 1px solid var(--border);
+    font-size: 0.8rem; color: var(--text2);
+  }
+  .feat-pill .dot { width: 6px; height: 6px; border-radius: 50%; }
+
+  /* ─── STEPS ─── */
+  .steps {
+    display: grid; grid-template-columns: repeat(3, 1fr);
+    gap: 16px; margin-bottom: 36px;
+  }
+  @media(max-width:700px){ .steps { grid-template-columns: 1fr; } }
+  .step-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px 20px 18px;
+    transition: border-color .2s;
+  }
+  .step-card:hover { border-color: var(--accent); }
+  .step-num {
+    font-family: 'Syne', sans-serif;
+    font-size: 2rem; font-weight: 800;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    margin-bottom: 6px;
+  }
+  .step-card h3 { font-family: 'Syne', sans-serif; font-size: 0.95rem; font-weight: 700; margin-bottom: 4px; }
+  .step-card p { font-size: 0.82rem; color: var(--text2); line-height: 1.5; }
+
+  /* ─── UPLOAD ZONE ─── */
+  .upload-zone {
+    border: 2px dashed var(--border);
+    border-radius: var(--radius);
+    padding: 56px 32px;
+    text-align: center;
+    cursor: pointer;
+    transition: all .25s;
+    background: var(--surface);
+    position: relative; overflow: hidden;
+    margin-bottom: 32px;
+  }
+  .upload-zone:hover, .upload-zone.dragover {
+    border-color: var(--accent);
+    background: rgba(79,138,255,0.04);
+    box-shadow: var(--glow);
+  }
+  .upload-zone input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+  .upload-icon {
+    width: 64px; height: 64px; margin: 0 auto 16px;
+    background: linear-gradient(135deg, rgba(79,138,255,0.15), rgba(162,89,255,0.15));
+    border-radius: 18px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.8rem;
+  }
+  .upload-zone h2 { font-family: 'Syne', sans-serif; font-size: 1.2rem; font-weight: 700; margin-bottom: 8px; }
+  .upload-zone p { color: var(--text2); font-size: 0.88rem; }
+  .upload-zone .limit-badge {
+    display: inline-block; margin-top: 12px;
+    padding: 4px 12px; border-radius: 999px;
+    background: rgba(255,179,71,0.1); border: 1px solid rgba(255,179,71,0.25);
+    color: var(--warn); font-size: 0.75rem;
+  }
+
+  /* ─── WORKSPACE ─── */
+  .workspace { display: none; }
+  .workspace.active { display: grid; grid-template-columns: 1fr 380px; gap: 24px; }
+  @media(max-width:900px){ .workspace.active { grid-template-columns: 1fr; } }
+
+  /* ─── VIDEO PANEL ─── */
+  .video-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .video-wrap {
+    position: relative; background: #000;
+    aspect-ratio: 16/9;
+  }
+  video#mainVideo {
+    width: 100%; height: 100%; display: block;
+    object-fit: contain;
+  }
+  /* Subtitle overlay */
+  #subtitleOverlay {
+    position: absolute;
+    bottom: 10%;
+    left: 50%; transform: translateX(-50%);
+    width: 90%;
+    text-align: center;
+    pointer-events: none;
+    z-index: 5;
+  }
+  #subtitleText {
+    display: inline-block;
+    background: rgba(0,0,0,0.72);
+    color: #fff;
+    font-size: clamp(0.9rem, 2.2vw, 1.25rem);
+    font-weight: 500;
+    padding: 6px 16px;
+    border-radius: 6px;
+    letter-spacing: 0.2px;
+    line-height: 1.5;
+    max-width: 100%;
+    backdrop-filter: blur(4px);
+    text-shadow: 0 1px 4px rgba(0,0,0,0.6);
+  }
+  #subtitleText:empty { display: none; }
+
+  /* Subtitle style controls */
+  .subtitle-style-bar {
+    display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+    padding: 12px 16px;
+    border-top: 1px solid var(--border);
+    background: var(--surface2);
+  }
+  .style-label { font-size: 0.75rem; color: var(--text2); }
+  .style-control {
+    display: flex; align-items: center; gap: 6px;
+  }
+  .style-control select, .style-control input[type=color] {
+    background: var(--bg); border: 1px solid var(--border);
+    color: var(--text); border-radius: 6px; padding: 4px 8px;
+    font-size: 0.78rem; cursor: pointer;
+  }
+  .style-control input[type=range] {
+    width: 80px; accent-color: var(--accent);
+  }
+  .style-control input[type=color] { padding: 2px; width: 32px; height: 28px; }
+
+  /* Video controls bar */
+  .video-controls-bar {
+    display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+    padding: 14px 16px;
+    border-top: 1px solid var(--border);
+  }
+  .btn {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 9px 18px; border-radius: 8px; border: none;
+    font-family: 'DM Sans', sans-serif; font-size: 0.85rem; font-weight: 500;
+    cursor: pointer; transition: all .18s; white-space: nowrap;
+  }
+  .btn-primary {
+    background: linear-gradient(135deg, var(--accent), #3a6fd6);
+    color: #fff;
+    box-shadow: 0 4px 18px rgba(79,138,255,0.25);
+  }
+  .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 6px 24px rgba(79,138,255,0.35); }
+  .btn-primary:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+  .btn-ghost {
+    background: var(--surface2); color: var(--text2);
+    border: 1px solid var(--border);
+  }
+  .btn-ghost:hover { color: var(--text); border-color: var(--accent); }
+  .btn-success {
+    background: linear-gradient(135deg, var(--accent3), #00b388);
+    color: #04120e;
+  }
+  .btn-success:hover { transform: translateY(-1px); box-shadow: 0 4px 18px rgba(0,229,176,0.25); }
+  .btn-danger {
+    background: rgba(255,79,110,0.12);
+    color: var(--danger); border: 1px solid rgba(255,79,110,0.25);
+  }
+  .btn-danger:hover { background: rgba(255,79,110,0.2); }
+
+  /* ─── SIDEBAR ─── */
+  .sidebar { display: flex; flex-direction: column; gap: 16px; }
+
+  /* Generate panel */
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .panel-header {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .panel-header h3 {
+    font-family: 'Syne', sans-serif; font-size: 0.95rem; font-weight: 700;
+  }
+  .panel-body { padding: 16px 20px; }
+
+  .form-group { margin-bottom: 14px; }
+  .form-group label { display: block; font-size: 0.78rem; color: var(--text2); margin-bottom: 6px; font-weight: 500; }
+  .form-group select, .form-group input[type=text] {
+    width: 100%; padding: 9px 12px;
+    background: var(--bg); border: 1px solid var(--border);
+    color: var(--text); border-radius: 8px;
+    font-family: 'DM Sans', sans-serif; font-size: 0.85rem;
+    transition: border-color .18s;
+  }
+  .form-group select:focus, .form-group input:focus {
+    outline: none; border-color: var(--accent);
+  }
+
+  /* Progress */
+  .progress-wrap { margin-top: 14px; }
+  .progress-bar-bg {
+    height: 5px; background: var(--border); border-radius: 999px; overflow: hidden;
+  }
+  .progress-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    border-radius: 999px;
+    transition: width .3s ease;
+    width: 0%;
+  }
+  .progress-label { font-size: 0.75rem; color: var(--text2); margin-top: 6px; }
+
+  /* ─── SUBTITLE EDITOR ─── */
+  .subtitle-list {
+    max-height: 340px; overflow-y: auto;
+    padding: 8px;
+    scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+  }
+  .sub-item {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin-bottom: 6px;
+    cursor: pointer;
+    transition: all .15s;
+  }
+  .sub-item:hover { border-color: var(--accent); }
+  .sub-item.active { border-color: var(--accent); background: rgba(79,138,255,0.06); }
+  .sub-time {
+    font-size: 0.72rem; color: var(--accent); font-family: 'Syne', sans-serif;
+    font-weight: 600; margin-bottom: 4px;
+  }
+  .sub-text-display { font-size: 0.82rem; color: var(--text); line-height: 1.4; }
+  .sub-edit-area {
+    width: 100%; background: var(--surface2);
+    border: 1px solid var(--accent); border-radius: 6px;
+    color: var(--text); font-family: 'DM Sans', sans-serif;
+    font-size: 0.82rem; padding: 6px 8px; resize: vertical;
+    margin-top: 6px; min-height: 48px;
+  }
+  .sub-edit-area:focus { outline: none; }
+  .sub-actions {
+    display: flex; gap: 6px; margin-top: 6px;
+    justify-content: flex-end;
+  }
+  .sub-btn {
+    font-size: 0.72rem; padding: 3px 10px;
+    border-radius: 5px; border: none; cursor: pointer;
+    font-family: 'DM Sans', sans-serif;
+  }
+  .sub-btn-save { background: var(--accent); color: #fff; }
+  .sub-btn-cancel { background: var(--surface2); color: var(--text2); border: 1px solid var(--border); }
+  .sub-btn-del { background: rgba(255,79,110,0.12); color: var(--danger); border: 1px solid rgba(255,79,110,0.25); }
+
+  /* ─── TRANSLATE PANEL ─── */
+  .lang-grid {
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 6px; margin-bottom: 12px;
+  }
+  .lang-opt {
+    padding: 7px 10px; border-radius: 7px;
+    border: 1px solid var(--border);
+    background: var(--bg); color: var(--text2);
+    font-size: 0.78rem; cursor: pointer; text-align: center;
+    transition: all .15s;
+  }
+  .lang-opt:hover { border-color: var(--accent); color: var(--text); }
+  .lang-opt.selected { border-color: var(--accent); background: rgba(79,138,255,0.1); color: var(--accent); font-weight: 600; }
+
+  /* ─── TOAST ─── */
+  #toast {
+    position: fixed; bottom: 32px; right: 32px; z-index: 9999;
+    padding: 14px 20px; border-radius: 10px;
+    background: var(--surface2); border: 1px solid var(--border);
+    color: var(--text); font-size: 0.88rem;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+    transform: translateY(80px); opacity: 0;
+    transition: all .3s cubic-bezier(.34,1.56,.64,1);
+    max-width: 320px;
+  }
+  #toast.show { transform: translateY(0); opacity: 1; }
+  #toast.success { border-color: var(--accent3); color: var(--accent3); }
+  #toast.error { border-color: var(--danger); color: var(--danger); }
+
+  /* ─── LOADING SPINNER ─── */
+  .spinner {
+    width: 16px; height: 16px;
+    border: 2px solid rgba(255,255,255,0.2);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin .7s linear infinite;
+    display: inline-block;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Tab system */
+  .tabs { display: flex; border-bottom: 1px solid var(--border); }
+  .tab {
+    padding: 10px 16px; font-size: 0.82rem;
+    border: none; background: none; cursor: pointer;
+    color: var(--text2); font-family: 'DM Sans', sans-serif;
+    border-bottom: 2px solid transparent; margin-bottom: -1px;
+    transition: all .15s;
+  }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .tab-content { display: none; padding: 16px 20px; }
+  .tab-content.active { display: block; }
+
+  .empty-state {
+    text-align: center; padding: 32px 16px; color: var(--text2);
+  }
+  .empty-state .es-icon { font-size: 2.2rem; margin-bottom: 8px; }
+  .empty-state p { font-size: 0.82rem; line-height: 1.5; }
+
+  /* file info bar */
+  .file-info-bar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 16px; background: var(--surface2);
+    border-bottom: 1px solid var(--border);
+    font-size: 0.8rem; color: var(--text2);
+    flex-wrap: wrap; gap: 8px;
+  }
+  .file-info-bar strong { color: var(--text); }
+
+  .divider { height: 1px; background: var(--border); margin: 8px 0; }
+
+  .add-sub-row {
+    display: flex; gap: 8px; padding: 10px 12px;
+    border-top: 1px solid var(--border);
+  }
+  .add-sub-row input {
+    flex: 1; background: var(--bg); border: 1px solid var(--border);
+    color: var(--text); border-radius: 7px; padding: 7px 10px;
+    font-size: 0.82rem; font-family: 'DM Sans', sans-serif;
+  }
+  .add-sub-row input:focus { outline: none; border-color: var(--accent); }
+
+  /* download section */
+  .download-section {
+    background: linear-gradient(135deg, rgba(79,138,255,0.06), rgba(0,229,176,0.06));
+    border: 1px solid rgba(79,138,255,0.2);
+    border-radius: var(--radius);
+    padding: 20px;
+    text-align: center;
+  }
+  .download-section h3 { font-family: 'Syne', sans-serif; font-size: 1rem; font-weight: 700; margin-bottom: 6px; }
+  .download-section p { font-size: 0.8rem; color: var(--text2); margin-bottom: 14px; line-height: 1.5; }
+  .download-btns { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+
+  /* Rendering modal */
+  .modal-overlay {
+    position: fixed; inset: 0; z-index: 1000;
+    background: rgba(8,11,18,0.85); backdrop-filter: blur(8px);
+    display: flex; align-items: center; justify-content: center;
+    display: none;
+  }
+  .modal-overlay.active { display: flex; }
+  .modal-box {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 18px; padding: 36px 40px;
+    text-align: center; max-width: 380px;
+    box-shadow: 0 24px 80px rgba(0,0,0,0.5);
+  }
+  .modal-box h3 { font-family: 'Syne', sans-serif; font-size: 1.1rem; font-weight: 700; margin-bottom: 8px; }
+  .modal-box p { color: var(--text2); font-size: 0.85rem; line-height: 1.6; margin-bottom: 20px; }
+  .big-spinner {
+    width: 48px; height: 48px; margin: 0 auto 20px;
+    border: 3px solid rgba(79,138,255,0.2);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin .8s linear infinite;
+  }
+  .modal-progress { margin-top: 16px; }
+  .modal-progress .progress-bar-bg { height: 6px; }
+
+  @media(max-width:600px){
+    header { padding: 14px 18px; }
+    main { padding: 16px 14px 60px; }
+    .hero h1 { font-size: 2rem; }
+  }
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header>
+  <div class="logo">Subtitle<span>AI</span></div>
+  <div style="display:flex;gap:10px;align-items:center">
+    <span class="badge">⚡ Groq Whisper</span>
+  </div>
+</header>
+
+<!-- MAIN -->
+<main>
+
+  <!-- HERO -->
+  <div class="hero" id="heroSection">
+    <h1>AI Subtitles<br>in Seconds</h1>
+    <p>Upload your video, generate captions instantly with Groq Whisper, translate to 20+ languages, and download.</p>
+    <div class="features-row">
+      <span class="feat-pill"><span class="dot" style="background:var(--accent)"></span>Groq Whisper AI</span>
+      <span class="feat-pill"><span class="dot" style="background:var(--accent2)"></span>20+ Languages</span>
+      <span class="feat-pill"><span class="dot" style="background:var(--accent3)"></span>Live Editor</span>
+      <span class="feat-pill"><span class="dot" style="background:var(--warn)"></span>Download Video</span>
+    </div>
+  </div>
+
+  <!-- STEPS -->
+  <div class="steps" id="stepsSection">
+    <div class="step-card">
+      <div class="step-num">01</div>
+      <h3>Upload Video</h3>
+      <p>Drop your video file (up to 25MB). Supports MP4, WebM, MOV, AVI formats.</p>
+    </div>
+    <div class="step-card">
+      <div class="step-num">02</div>
+      <h3>Generate & Edit</h3>
+      <p>Groq Whisper transcribes your audio. Edit subtitles, translate to any language.</p>
+    </div>
+    <div class="step-card">
+      <div class="step-num">03</div>
+      <h3>Download</h3>
+      <p>Export your video with burnt-in subtitles or download the SRT/VTT file.</p>
+    </div>
+  </div>
+
+  <!-- UPLOAD ZONE -->
+  <div class="upload-zone" id="uploadZone">
+    <input type="file" id="fileInput" accept="video/*" />
+    <div class="upload-icon">🎬</div>
+    <h2>Drop your video here</h2>
+    <p>or click to browse files</p>
+    <span class="limit-badge">⚠ Max 25 MB · MP4, WebM, MOV, AVI</span>
+  </div>
+
+  <!-- WORKSPACE -->
+  <div class="workspace" id="workspace">
+
+    <!-- LEFT: VIDEO -->
+    <div>
+      <div class="video-panel">
+        <div class="file-info-bar">
+          <span><strong id="fileName">video.mp4</strong></span>
+          <span id="fileSize" style="color:var(--text2)"></span>
+          <button class="btn btn-ghost" style="padding:4px 10px;font-size:0.75rem" onclick="resetAll()">✕ Remove</button>
+        </div>
+        <div class="video-wrap">
+          <video id="mainVideo" controls></video>
+          <div id="subtitleOverlay">
+            <span id="subtitleText"></span>
+          </div>
+        </div>
+        <div class="subtitle-style-bar">
+          <span class="style-label">Style:</span>
+          <div class="style-control">
+            <span class="style-label">Size</span>
+            <input type="range" id="subSize" min="12" max="40" value="20" oninput="updateSubStyle()">
+          </div>
+          <div class="style-control">
+            <span class="style-label">Color</span>
+            <input type="color" id="subColor" value="#ffffff" oninput="updateSubStyle()">
+          </div>
+          <div class="style-control">
+            <span class="style-label">BG</span>
+            <input type="color" id="subBg" value="#000000" oninput="updateSubStyle()">
+            <input type="range" id="subBgAlpha" min="0" max="100" value="72" oninput="updateSubStyle()">
+          </div>
+          <div class="style-control">
+            <span class="style-label">Font</span>
+            <select id="subFont" onchange="updateSubStyle()">
+              <option value="'DM Sans',sans-serif">DM Sans</option>
+              <option value="'Syne',sans-serif">Syne</option>
+              <option value="Georgia,serif">Georgia</option>
+              <option value="monospace">Mono</option>
+              <option value="Impact,sans-serif">Impact</option>
+            </select>
+          </div>
+          <div class="style-control">
+            <span class="style-label">Pos</span>
+            <select id="subPos" onchange="updateSubStyle()">
+              <option value="10%">Bottom</option>
+              <option value="50%">Middle</option>
+              <option value="85%">Top</option>
+            </select>
+          </div>
+        </div>
+        <div class="video-controls-bar">
+          <button class="btn btn-primary" id="generateBtn" onclick="generateSubtitles()">
+            ✨ Generate Subtitles
+          </button>
+          <button class="btn btn-ghost" id="clearSubBtn" onclick="clearSubtitles()" style="display:none">
+            🗑 Clear
+          </button>
+        </div>
+      </div>
+
+      <!-- DOWNLOAD SECTION -->
+      <div class="download-section" id="downloadSection" style="display:none;margin-top:20px">
+        <h3>📥 Export Your Subtitles</h3>
+        <p>Download the video with subtitles overlaid, or export subtitle files for use in any video player.</p>
+        <div class="download-btns">
+          <button class="btn btn-success" onclick="downloadVideoWithSubs()">🎬 Download Video + Subs</button>
+          <button class="btn btn-ghost" onclick="downloadSRT()">📄 Download SRT</button>
+          <button class="btn btn-ghost" onclick="downloadVTT()">📄 Download VTT</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT: SIDEBAR -->
+    <div class="sidebar">
+
+      <!-- GENERATE PANEL -->
+      <div class="panel">
+        <div class="panel-header">
+          <h3>⚙️ Settings</h3>
+        </div>
+        <div class="panel-body">
+          <div class="form-group">
+            <label>Transcription Language (optional)</label>
+            <select id="transcribeLang">
+              <option value="">Auto Detect</option>
+              <option value="en">English</option>
+              <option value="hi">Hindi</option>
+              <option value="bn">Bengali</option>
+              <option value="te">Telugu</option>
+              <option value="mr">Marathi</option>
+              <option value="ta">Tamil</option>
+              <option value="gu">Gujarati</option>
+              <option value="kn">Kannada</option>
+              <option value="ml">Malayalam</option>
+              <option value="pa">Punjabi</option>
+              <option value="ur">Urdu</option>
+              <option value="fr">French</option>
+              <option value="es">Spanish</option>
+              <option value="de">German</option>
+              <option value="it">Italian</option>
+              <option value="pt">Portuguese</option>
+              <option value="ru">Russian</option>
+              <option value="ja">Japanese</option>
+              <option value="ko">Korean</option>
+              <option value="zh">Chinese</option>
+              <option value="ar">Arabic</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Groq API Key</label>
+            <input type="text" id="apiKeyInput" placeholder="gsk_..." value="" placeholder="gsk_..." />
+          </div>
+          <div id="progressWrap" class="progress-wrap" style="display:none">
+            <div class="progress-bar-bg"><div class="progress-bar-fill" id="progressFill"></div></div>
+            <div class="progress-label" id="progressLabel">Processing…</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- SUBTITLE EDITOR + TRANSLATE TABS -->
+      <div class="panel" style="flex:1;min-height:0;">
+        <div class="tabs">
+          <button class="tab active" onclick="switchTab('editor')">✏️ Editor</button>
+          <button class="tab" onclick="switchTab('translate')">🌐 Translate</button>
+        </div>
+
+        <!-- EDITOR TAB -->
+        <div class="tab-content active" id="tab-editor">
+          <div class="subtitle-list" id="subtitleList">
+            <div class="empty-state">
+              <div class="es-icon">💬</div>
+              <p>Generate subtitles first, then edit them here.</p>
+            </div>
+          </div>
+          <div class="add-sub-row" id="addSubRow" style="display:none">
+            <input type="text" id="newSubInput" placeholder="Type subtitle text…" />
+            <button class="btn btn-ghost" style="padding:7px 12px;font-size:0.78rem" onclick="addSubtitleManually()">+ Add</button>
+          </div>
+        </div>
+
+        <!-- TRANSLATE TAB -->
+        <div class="tab-content" id="tab-translate">
+          <p style="font-size:0.8rem;color:var(--text2);margin-bottom:12px;line-height:1.5">Select a target language to translate your subtitles using AI.</p>
+          <div class="lang-grid" id="langGrid">
+            <!-- Populated by JS -->
+          </div>
+          <button class="btn btn-primary" style="width:100%" onclick="translateSubtitles()" id="translateBtn">
+            🌐 Translate Subtitles
+          </button>
+          <div id="translateProgress" class="progress-wrap" style="display:none;margin-top:10px">
+            <div class="progress-bar-bg"><div class="progress-bar-fill" id="translateFill"></div></div>
+            <div class="progress-label" id="translateLabel">Translating…</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+</main>
+
+<!-- TOAST -->
+<div id="toast"></div>
+
+<!-- RENDER MODAL -->
+<div class="modal-overlay" id="renderModal">
+  <div class="modal-box">
+    <div class="big-spinner"></div>
+    <h3>Rendering Video</h3>
+    <p>Burning subtitles into your video. This may take a moment depending on the video length.</p>
+    <div class="modal-progress">
+      <div class="progress-bar-bg"><div class="progress-bar-fill" id="renderFill" style="width:0%"></div></div>
+      <div class="progress-label" id="renderLabel">Preparing…</div>
+    </div>
+    <button class="btn btn-ghost" style="margin-top:16px;width:100%" onclick="cancelRender()">Cancel</button>
+  </div>
+</div>
+
+<script>
+// ─────────────────────────────────────────
+// STATE
+// ─────────────────────────────────────────
+let videoFile = null;
+let subtitles = []; // [{id, start, end, text}]
+let editingId = null;
+let selectedLang = 'hi';
+let renderCancelled = false;
+
+const GROQ_KEY_FALLBACK = '';
+
+const LANGUAGES = [
+  // Indian
+  { code:'hi', label:'Hindi', flag:'🇮🇳' },
+  { code:'bn', label:'Bengali', flag:'🇧🇩' },
+  { code:'te', label:'Telugu', flag:'🇮🇳' },
+  { code:'mr', label:'Marathi', flag:'🇮🇳' },
+  { code:'ta', label:'Tamil', flag:'🇮🇳' },
+  { code:'gu', label:'Gujarati', flag:'🇮🇳' },
+  { code:'kn', label:'Kannada', flag:'🇮🇳' },
+  { code:'ml', label:'Malayalam', flag:'🇮🇳' },
+  { code:'pa', label:'Punjabi', flag:'🇮🇳' },
+  { code:'ur', label:'Urdu', flag:'🇵🇰' },
+  { code:'or', label:'Odia', flag:'🇮🇳' },
+  { code:'as', label:'Assamese', flag:'🇮🇳' },
+  // Foreign
+  { code:'en', label:'English', flag:'🇬🇧' },
+  { code:'fr', label:'French', flag:'🇫🇷' },
+  { code:'es', label:'Spanish', flag:'🇪🇸' },
+  { code:'de', label:'German', flag:'🇩🇪' },
+  { code:'it', label:'Italian', flag:'🇮🇹' },
+  { code:'pt', label:'Portuguese', flag:'🇵🇹' },
+  { code:'ru', label:'Russian', flag:'🇷🇺' },
+  { code:'ja', label:'Japanese', flag:'🇯🇵' },
+  { code:'ko', label:'Korean', flag:'🇰🇷' },
+  { code:'zh', label:'Chinese', flag:'🇨🇳' },
+  { code:'ar', label:'Arabic', flag:'🇸🇦' },
+  { code:'tr', label:'Turkish', flag:'🇹🇷' },
+];
+
+// ─────────────────────────────────────────
+// INIT
+// ─────────────────────────────────────────
+function init() {
+  // Build language grid
+  const grid = document.getElementById('langGrid');
+  LANGUAGES.forEach(l => {
+    const div = document.createElement('div');
+    div.className = 'lang-opt' + (l.code === selectedLang ? ' selected' : '');
+    div.textContent = l.flag + ' ' + l.label;
+    div.onclick = () => {
+      selectedLang = l.code;
+      grid.querySelectorAll('.lang-opt').forEach(x => x.classList.remove('selected'));
+      div.classList.add('selected');
+    };
+    grid.appendChild(div);
+  });
+
+  // Drag & drop
+  const zone = document.getElementById('uploadZone');
+  zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('dragover'); });
+  zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
+  zone.addEventListener('drop', e => {
+    e.preventDefault(); zone.classList.remove('dragover');
+    if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+  });
+  document.getElementById('fileInput').addEventListener('change', e => {
+    if (e.target.files[0]) handleFile(e.target.files[0]);
+  });
+
+  // Video timeupdate for subtitles
+  document.getElementById('mainVideo').addEventListener('timeupdate', onTimeUpdate);
+}
+
+// ─────────────────────────────────────────
+// FILE HANDLING
+// ─────────────────────────────────────────
+function handleFile(file) {
+  if (!file.type.startsWith('video/')) { showToast('Please upload a valid video file.', 'error'); return; }
+  if (file.size > 25 * 1024 * 1024) { showToast('File exceeds 25MB limit.', 'error'); return; }
+
+  videoFile = file;
+  const url = URL.createObjectURL(file);
+  document.getElementById('mainVideo').src = url;
+  document.getElementById('fileName').textContent = file.name;
+  document.getElementById('fileSize').textContent = formatBytes(file.size);
+
+  document.getElementById('uploadZone').style.display = 'none';
+  document.getElementById('heroSection').style.display = 'none';
+  document.getElementById('stepsSection').style.display = 'none';
+  document.getElementById('workspace').classList.add('active');
+
+  showToast('Video loaded! Click "Generate Subtitles" to start.', 'success');
+}
+
+function resetAll() {
+  videoFile = null; subtitles = [];
+  document.getElementById('mainVideo').src = '';
+  document.getElementById('uploadZone').style.display = '';
+  document.getElementById('heroSection').style.display = '';
+  document.getElementById('stepsSection').style.display = '';
+  document.getElementById('workspace').classList.remove('active');
+  document.getElementById('fileInput').value = '';
+  document.getElementById('subtitleText').textContent = '';
+  document.getElementById('downloadSection').style.display = 'none';
+  document.getElementById('clearSubBtn').style.display = 'none';
+  document.getElementById('addSubRow').style.display = 'none';
+  renderSubtitleList();
+}
+
+function formatBytes(b) {
+  if (b < 1024) return b + ' B';
+  if (b < 1024*1024) return (b/1024).toFixed(1) + ' KB';
+  return (b/1024/1024).toFixed(2) + ' MB';
+}
+
+// ─────────────────────────────────────────
+// SUBTITLE STYLE
+// ─────────────────────────────────────────
+function updateSubStyle() {
+  const el = document.getElementById('subtitleText');
+  const size = document.getElementById('subSize').value;
+  const color = document.getElementById('subColor').value;
+  const bg = document.getElementById('subBg').value;
+  const alpha = parseInt(document.getElementById('subBgAlpha').value) / 100;
+  const font = document.getElementById('subFont').value;
+  const pos = document.getElementById('subPos').value;
+
+  el.style.fontSize = size + 'px';
+  el.style.color = color;
+  el.style.fontFamily = font;
+
+  // Convert hex bg to rgba
+  const r = parseInt(bg.slice(1,3),16);
+  const g = parseInt(bg.slice(3,5),16);
+  const bv = parseInt(bg.slice(5,7),16);
+  el.style.background = `rgba(${r},${g},${bv},${alpha})`;
+
+  document.getElementById('subtitleOverlay').style.bottom = pos === '10%' ? '10%' : pos === '85%' ? 'auto' : '50%';
+  document.getElementById('subtitleOverlay').style.top = pos === '85%' ? '5%' : pos === '50%' ? '50%' : 'auto';
+}
+
+// ─────────────────────────────────────────
+// TIME UPDATE → SHOW SUBTITLE
+// ─────────────────────────────────────────
+function onTimeUpdate() {
+  const t = document.getElementById('mainVideo').currentTime;
+  const active = subtitles.find(s => t >= s.start && t <= s.end);
+  document.getElementById('subtitleText').textContent = active ? active.text : '';
+  // Highlight active in list
+  document.querySelectorAll('.sub-item').forEach(el => {
+    el.classList.toggle('active', el.dataset.id === String(active?.id));
+  });
+}
+
+// ─────────────────────────────────────────
+// GENERATE SUBTITLES (Groq Whisper)
+// ─────────────────────────────────────────
+async function generateSubtitles() {
+  if (!videoFile) return;
+
+  const apiKey = document.getElementById('apiKeyInput').value.trim() || GROQ_KEY_FALLBACK;
+  if (!apiKey) { showToast('Please enter your Groq API key.', 'error'); return; }
+
+  const btn = document.getElementById('generateBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Generating…';
+
+  showProgress(true, 'Extracting audio…', 10);
+
+  try {
+    // Extract audio as webm blob
+    const audioBlob = await extractAudio(videoFile);
+    showProgress(true, 'Sending to Groq Whisper…', 30);
+
+    const lang = document.getElementById('transcribeLang').value;
+    const formData = new FormData();
+    formData.append('file', audioBlob, 'audio.webm');
+    formData.append('model', 'whisper-large-v3');
+    formData.append('response_format', 'verbose_json');
+    formData.append('timestamp_granularities[]', 'segment');
+    if (lang) formData.append('language', lang);
+
+    showProgress(true, 'Transcribing with Whisper AI…', 55);
+
+    const res = await fetch('https://subgen.damorsumit2000.workers.dev/openai/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + apiKey },
+      body: formData
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err?.error?.message || 'Groq API error ' + res.status);
+    }
+
+    const data = await res.json();
+    showProgress(true, 'Parsing subtitles…', 85);
+
+    const segments = data.segments || [];
+    if (segments.length === 0) throw new Error('No speech detected in video.');
+
+    subtitles = segments.map((s, i) => ({
+      id: i,
+      start: s.start,
+      end: s.end,
+      text: s.text.trim()
+    }));
+
+    showProgress(true, 'Done!', 100);
+    setTimeout(() => showProgress(false), 800);
+
+    renderSubtitleList();
+    document.getElementById('downloadSection').style.display = '';
+    document.getElementById('clearSubBtn').style.display = '';
+    document.getElementById('addSubRow').style.display = '';
+
+    showToast(`✅ ${subtitles.length} subtitles generated!`, 'success');
+  } catch (e) {
+    showProgress(false);
+    showToast('Error: ' + e.message, 'error');
+    console.error(e);
+  }
+
+  btn.disabled = false;
+  btn.innerHTML = '✨ Re-generate';
+}
+
+// ─────────────────────────────────────────
+// EXTRACT AUDIO (MediaRecorder approach)
+// ─────────────────────────────────────────
+function extractAudio(file) {
+  return new Promise(async (resolve, reject) => {
+    try {
+      const url = URL.createObjectURL(file);
+      const audio = new Audio();
+      audio.src = url;
+      audio.crossOrigin = 'anonymous';
+
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const dest = audioCtx.createMediaStreamDestination();
+
+      await new Promise(r => { audio.oncanplaythrough = r; audio.load(); });
+
+      const source = audioCtx.createMediaElementSource(audio);
+      source.connect(dest);
+      source.connect(audioCtx.destination); // keep playing but muted
+      audio.muted = true;
+
+      const recorder = new MediaRecorder(dest.stream, { mimeType: 'audio/webm;codecs=opus' });
+      const chunks = [];
+      recorder.ondataavailable = e => chunks.push(e.data);
+      recorder.onstop = () => {
+        const blob = new Blob(chunks, { type: 'audio/webm' });
+        URL.revokeObjectURL(url);
+        resolve(blob);
+      };
+
+      recorder.start();
+      audio.play();
+      audio.onended = () => { recorder.stop(); audioCtx.close(); };
+    } catch (e) {
+      // Fallback: just send the video file directly (Groq handles it)
+      resolve(new Blob([file], { type: 'audio/webm' }));
+    }
+  });
+}
+
+// ─────────────────────────────────────────
+// SUBTITLE LIST RENDER
+// ─────────────────────────────────────────
+function renderSubtitleList() {
+  const list = document.getElementById('subtitleList');
+  if (subtitles.length === 0) {
+    list.innerHTML = '<div class="empty-state"><div class="es-icon">💬</div><p>Generate subtitles first, then edit them here.</p></div>';
+    return;
+  }
+  list.innerHTML = '';
+  subtitles.forEach(s => {
+    const div = document.createElement('div');
+    div.className = 'sub-item';
+    div.dataset.id = s.id;
+    div.onclick = () => seekTo(s.start);
+
+    if (editingId === s.id) {
+      div.innerHTML = `
+        <div class="sub-time">${fmtTime(s.start)} → ${fmtTime(s.end)}</div>
+        <textarea class="sub-edit-area" id="edit_${s.id}">${s.text}</textarea>
+        <div class="sub-actions">
+          <button class="sub-btn sub-btn-del" onclick="deleteSubtitle(${s.id},event)">🗑 Delete</button>
+          <button class="sub-btn sub-btn-cancel" onclick="cancelEdit(event)">Cancel</button>
+          <button class="sub-btn sub-btn-save" onclick="saveEdit(${s.id},event)">Save</button>
+        </div>`;
+    } else {
+      div.innerHTML = `
+        <div class="sub-time">${fmtTime(s.start)} → ${fmtTime(s.end)}</div>
+        <div class="sub-text-display">${s.text}</div>`;
+      div.ondblclick = e => { e.stopPropagation(); editingId = s.id; renderSubtitleList(); };
+      div.title = 'Double-click to edit';
+    }
+    list.appendChild(div);
+  });
+}
+
+function saveEdit(id, e) {
+  e.stopPropagation();
+  const val = document.getElementById('edit_' + id).value.trim();
+  const s = subtitles.find(x => x.id === id);
+  if (s && val) s.text = val;
+  editingId = null; renderSubtitleList();
+}
+function cancelEdit(e) { e.stopPropagation(); editingId = null; renderSubtitleList(); }
+function deleteSubtitle(id, e) {
+  e.stopPropagation();
+  subtitles = subtitles.filter(x => x.id !== id);
+  editingId = null; renderSubtitleList();
+  showToast('Subtitle deleted.', '');
+}
+
+function addSubtitleManually() {
+  const inp = document.getElementById('newSubInput');
+  const text = inp.value.trim();
+  if (!text) return;
+  const video = document.getElementById('mainVideo');
+  const t = video.currentTime || 0;
+  const newId = subtitles.length ? Math.max(...subtitles.map(s => s.id)) + 1 : 0;
+  subtitles.push({ id: newId, start: t, end: t + 3, text });
+  subtitles.sort((a, b) => a.start - b.start);
+  inp.value = ''; renderSubtitleList();
+  showToast('Subtitle added at ' + fmtTime(t));
+}
+
+function clearSubtitles() {
+  if (!confirm('Clear all subtitles?')) return;
+  subtitles = []; renderSubtitleList();
+  document.getElementById('downloadSection').style.display = 'none';
+  document.getElementById('clearSubBtn').style.display = 'none';
+  document.getElementById('subtitleText').textContent = '';
+}
+
+function seekTo(t) { document.getElementById('mainVideo').currentTime = t; }
+
+function fmtTime(s) {
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = (s % 60).toFixed(1);
+  return (h > 0 ? String(h).padStart(2,'0') + ':' : '') + String(m).padStart(2,'0') + ':' + String(Math.floor(s%60)).padStart(2,'0') + '.' + (sec.split('.')[1] || '0');
+}
+
+function fmtTimeSRT(s) {
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = Math.floor(s % 60);
+  const ms = Math.round((s % 1) * 1000);
+  return String(h).padStart(2,'0')+':'+String(m).padStart(2,'0')+':'+String(sec).padStart(2,'0')+','+String(ms).padStart(3,'0');
+}
+
+// ─────────────────────────────────────────
+// TRANSLATE
+// ─────────────────────────────────────────
+async function translateSubtitles() {
+  if (!subtitles.length) { showToast('Generate subtitles first!', 'error'); return; }
+  const apiKey = document.getElementById('apiKeyInput').value.trim() || GROQ_KEY_FALLBACK;
+  const langName = LANGUAGES.find(l => l.code === selectedLang)?.label || selectedLang;
+
+  const btn = document.getElementById('translateBtn');
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Translating…';
+
+  document.getElementById('translateProgress').style.display = '';
+  setTranslateProgress(10, 'Preparing batch…');
+
+  try {
+    // Batch into chunks of 20
+    const BATCH = 20;
+    const result = [...subtitles];
+    for (let i = 0; i < result.length; i += BATCH) {
+      const chunk = result.slice(i, i + BATCH);
+      const pct = Math.round(10 + ((i / result.length) * 85));
+      setTranslateProgress(pct, `Translating ${i+1}–${Math.min(i+BATCH, result.length)} of ${result.length}…`);
+
+      const texts = chunk.map((s, idx) => `${idx+1}. ${s.text}`).join('\n');
+      const prompt = `Translate the following numbered subtitles to ${langName}. Return ONLY the translated lines in the same numbered format. Do not add explanations.\n\n${texts}`;
+
+      const res = await fetch('https://subgen.damorsumit2000.workers.dev/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'llama3-70b-8192',
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0.2,
+          max_tokens: 2000
+        })
+      });
+
+      if (!res.ok) throw new Error('Translation API error ' + res.status);
+      const data = await res.json();
+      const output = data.choices[0].message.content;
+      const lines = output.split('\n').filter(l => l.trim());
+
+      lines.forEach((line, idx) => {
+        const match = line.match(/^\d+\.\s+(.+)$/);
+        if (match && chunk[idx]) chunk[idx].text = match[1].trim();
+      });
+
+      // Update in result array
+      chunk.forEach((s, idx) => { result[i + idx].text = s.text; });
+    }
+
+    subtitles = result;
+    setTranslateProgress(100, 'Done!');
+    setTimeout(() => { document.getElementById('translateProgress').style.display = 'none'; }, 800);
+    renderSubtitleList();
+    showToast(`✅ Translated to ${langName}!`, 'success');
+  } catch (e) {
+    document.getElementById('translateProgress').style.display = 'none';
+    showToast('Translation error: ' + e.message, 'error');
+  }
+
+  btn.disabled = false; btn.innerHTML = '🌐 Translate Subtitles';
+}
+
+function setTranslateProgress(pct, label) {
+  document.getElementById('translateFill').style.width = pct + '%';
+  document.getElementById('translateLabel').textContent = label;
+}
+
+// ─────────────────────────────────────────
+// TABS
+// ─────────────────────────────────────────
+function switchTab(tab) {
+  document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', (tab==='editor'&&i===0)||(tab==='translate'&&i===1)));
+  document.getElementById('tab-editor').classList.toggle('active', tab === 'editor');
+  document.getElementById('tab-translate').classList.toggle('active', tab === 'translate');
+}
+
+// ─────────────────────────────────────────
+// DOWNLOAD FUNCTIONS
+// ─────────────────────────────────────────
+function downloadSRT() {
+  if (!subtitles.length) { showToast('No subtitles to download.', 'error'); return; }
+  let srt = '';
+  subtitles.forEach((s, i) => {
+    srt += `${i+1}\n${fmtTimeSRT(s.start)} --> ${fmtTimeSRT(s.end)}\n${s.text}\n\n`;
+  });
+  downloadBlob(new Blob([srt], {type:'text/plain'}), 'subtitles.srt');
+  showToast('SRT file downloaded!', 'success');
+}
+
+function downloadVTT() {
+  if (!subtitles.length) { showToast('No subtitles to download.', 'error'); return; }
+  let vtt = 'WEBVTT\n\n';
+  subtitles.forEach((s, i) => {
+    vtt += `${i+1}\n${fmtTimeVTT(s.start)} --> ${fmtTimeVTT(s.end)}\n${s.text}\n\n`;
+  });
+  downloadBlob(new Blob([vtt], {type:'text/vtt'}), 'subtitles.vtt');
+  showToast('VTT file downloaded!', 'success');
+}
+
+function fmtTimeVTT(s) {
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = Math.floor(s % 60);
+  const ms = Math.round((s % 1) * 1000);
+  return String(h).padStart(2,'0')+':'+String(m).padStart(2,'0')+':'+String(sec).padStart(2,'0')+'.'+String(ms).padStart(3,'0');
+}
+
+async function downloadVideoWithSubs() {
+  if (!subtitles.length) { showToast('Generate subtitles first.', 'error'); return; }
+  if (!videoFile) { showToast('No video loaded.', 'error'); return; }
+
+  renderCancelled = false;
+  document.getElementById('renderModal').classList.add('active');
+  setRenderProgress(5, 'Preparing canvas renderer…');
+
+  try {
+    await renderVideoWithSubtitles();
+  } catch (e) {
+    if (!renderCancelled) showToast('Render error: ' + e.message, 'error');
+  }
+  document.getElementById('renderModal').classList.remove('active');
+}
+
+function cancelRender() { renderCancelled = true; document.getElementById('renderModal').classList.remove('active'); }
+
+async function renderVideoWithSubtitles() {
+  const videoEl = document.getElementById('mainVideo');
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+
+  canvas.width = videoEl.videoWidth || 1280;
+  canvas.height = videoEl.videoHeight || 720;
+
+  const stream = canvas.captureStream(30);
+  const chunks = [];
+  const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')
+    ? 'video/webm;codecs=vp9,opus'
+    : 'video/webm';
+
+  const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 4_000_000 });
+  recorder.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+
+  // Add audio from video
+  const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  const audioDest = audioCtx.createMediaStreamDestination();
+  const src = audioCtx.createMediaElementSource(videoEl);
+  src.connect(audioDest); src.connect(audioCtx.destination);
+  audioDest.stream.getAudioTracks().forEach(t => stream.addTrack(t));
+
+  // Subtitle style
+  const size = document.getElementById('subSize').value;
+  const color = document.getElementById('subColor').value;
+  const bg = document.getElementById('subBg').value;
+  const alpha = parseInt(document.getElementById('subBgAlpha').value) / 100;
+  const font = document.getElementById('subFont').value.replace(/'/g,'').split(',')[0];
+  const posVal = document.getElementById('subPos').value;
+
+  function getSubtitleAtTime(t) {
+    return subtitles.find(s => t >= s.start && t <= s.end);
+  }
+
+  const duration = videoEl.duration;
+  let lastT = -1;
+
+  recorder.start(100);
+  videoEl.currentTime = 0;
+  await new Promise(r => setTimeout(r, 200));
+  videoEl.muted = false;
+  videoEl.play();
+
+  await new Promise((resolve, reject) => {
+    const draw = () => {
+      if (renderCancelled) { videoEl.pause(); recorder.stop(); reject(new Error('Cancelled')); return; }
+      ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+      const t = videoEl.currentTime;
+
+      // Draw subtitle
+      const sub = getSubtitleAtTime(t);
+      if (sub) {
+        const fs = parseInt(size) * (canvas.width / 960);
+        ctx.font = `500 ${fs}px "${font}"`;
+        const lines = wrapText(ctx, sub.text, canvas.width * 0.85);
+        const lineH = fs * 1.4;
+        const totalH = lines.length * lineH;
+        const padX = fs * 0.8, padY = fs * 0.4;
+        const maxW = Math.max(...lines.map(l => ctx.measureText(l).width));
+
+        let boxY;
+        if (posVal === '10%') boxY = canvas.height * 0.88 - totalH;
+        else if (posVal === '85%') boxY = canvas.height * 0.05;
+        else boxY = canvas.height * 0.5 - totalH / 2;
+
+        const r2 = parseInt(bg.slice(1,3),16);
+        const g2 = parseInt(bg.slice(3,5),16);
+        const b2 = parseInt(bg.slice(5,7),16);
+        ctx.fillStyle = `rgba(${r2},${g2},${b2},${alpha})`;
+        const boxX = (canvas.width - maxW - padX*2) / 2;
+        ctx.beginPath();
+        ctx.roundRect(boxX, boxY - padY, maxW + padX*2, totalH + padY*2, 8);
+        ctx.fill();
+
+        ctx.fillStyle = color;
+        ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+        lines.forEach((line, i) => ctx.fillText(line, canvas.width/2, boxY + i * lineH));
+      }
+
+      // Progress
+      const pct = Math.min(99, Math.round((t / duration) * 95) + 5);
+      setRenderProgress(pct, `Rendering ${fmtTimeSRT(t)} / ${fmtTimeSRT(duration)}`);
+
+      if (!videoEl.ended && !videoEl.paused && !renderCancelled) {
+        requestAnimationFrame(draw);
+      } else if (videoEl.ended) {
+        setTimeout(() => { recorder.stop(); }, 300);
+      }
+    };
+
+    videoEl.onended = () => {};
+    requestAnimationFrame(draw);
+
+    recorder.onstop = () => {
+      setRenderProgress(100, 'Saving file…');
+      const blob = new Blob(chunks, { type: mimeType });
+      const name = (videoFile?.name || 'video').replace(/\.[^.]+$/, '') + '_subtitled.webm';
+      downloadBlob(blob, name);
+      audioCtx.close();
+      resolve();
+    };
+  });
+}
+
+function wrapText(ctx, text, maxW) {
+  const words = text.split(' ');
+  const lines = []; let cur = '';
+  words.forEach(w => {
+    const test = cur ? cur + ' ' + w : w;
+    if (ctx.measureText(test).width > maxW && cur) { lines.push(cur); cur = w; }
+    else cur = test;
+  });
+  if (cur) lines.push(cur);
+  return lines;
+}
+
+function setRenderProgress(pct, label) {
+  document.getElementById('renderFill').style.width = pct + '%';
+  document.getElementById('renderLabel').textContent = label;
+}
+
+function downloadBlob(blob, name) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+}
+
+// ─────────────────────────────────────────
+// PROGRESS + TOAST
+// ─────────────────────────────────────────
+function showProgress(show, label = '', pct = 0) {
+  const wrap = document.getElementById('progressWrap');
+  wrap.style.display = show ? '' : 'none';
+  document.getElementById('progressFill').style.width = pct + '%';
+  document.getElementById('progressLabel').textContent = label;
+}
+
+let toastTimeout;
+function showToast(msg, type = '') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'show ' + type;
+  clearTimeout(toastTimeout);
+  toastTimeout = setTimeout(() => { t.className = ''; }, 3500);
+}
+
+// ─────────────────────────────────────────
+// BOOT
+// ─────────────────────────────────────────
+init();
+</script>
+</body>
+</html>
