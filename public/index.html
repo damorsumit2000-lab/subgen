@@ -882,22 +882,29 @@ async function generateSubtitles() {
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner"></span> Generating…';
 
-  showProgress(true, 'Extracting audio…', 10);
+  showProgress(true, 'Preparing file…', 10);
 
   try {
-    // Extract audio as webm blob
-    const audioBlob = await extractAudio(videoFile);
-    showProgress(true, 'Sending to Groq Whisper…', 30);
-
     const lang = document.getElementById('transcribeLang').value;
+
+    // Send the video file directly — Groq extracts audio server-side
+    // This avoids real-time re-encoding which causes timestamp drift
     const formData = new FormData();
-    formData.append('file', audioBlob, 'audio.webm');
+
+    // Use original file with correct extension for Groq to identify format
+    const ext = videoFile.name.split('.').pop().toLowerCase() || 'mp4';
+    const supportedExts = ['mp4', 'mpeg', 'mpga', 'mp3', 'm4a', 'wav', 'webm', 'ogg', 'flac'];
+    const fileExt = supportedExts.includes(ext) ? ext : 'mp4';
+
+    formData.append('file', videoFile, `audio.${fileExt}`);
     formData.append('model', 'whisper-large-v3');
     formData.append('response_format', 'verbose_json');
+    // Use BOTH word and segment timestamps for maximum precision
+    formData.append('timestamp_granularities[]', 'word');
     formData.append('timestamp_granularities[]', 'segment');
     if (lang) formData.append('language', lang);
 
-    showProgress(true, 'Transcribing with Whisper AI…', 55);
+    showProgress(true, 'Transcribing with Whisper AI…', 40);
 
     const res = await fetch('/proxy/audio/transcriptions', {
       method: 'POST',
@@ -913,15 +920,24 @@ async function generateSubtitles() {
     const data = await res.json();
     showProgress(true, 'Parsing subtitles…', 85);
 
+    // Use word-level timestamps grouped into natural subtitle chunks
+    const words = data.words || [];
     const segments = data.segments || [];
-    if (segments.length === 0) throw new Error('No speech detected in video.');
 
-    subtitles = segments.map((s, i) => ({
-      id: i,
-      start: s.start,
-      end: s.end,
-      text: s.text.trim()
-    }));
+    if (words.length > 0) {
+      // Build subtitle chunks from words — max 8 words or 3 seconds per subtitle
+      subtitles = buildSubtitlesFromWords(words);
+    } else if (segments.length > 0) {
+      // Fallback to segments
+      subtitles = segments.map((s, i) => ({
+        id: i,
+        start: parseFloat(s.start.toFixed(3)),
+        end: parseFloat(s.end.toFixed(3)),
+        text: s.text.trim()
+      }));
+    } else {
+      throw new Error('No speech detected in video.');
+    }
 
     showProgress(true, 'Done!', 100);
     setTimeout(() => showProgress(false), 800);
@@ -942,44 +958,38 @@ async function generateSubtitles() {
   btn.innerHTML = '✨ Re-generate';
 }
 
-// ─────────────────────────────────────────
-// EXTRACT AUDIO (MediaRecorder approach)
-// ─────────────────────────────────────────
-function extractAudio(file) {
-  return new Promise(async (resolve, reject) => {
-    try {
-      const url = URL.createObjectURL(file);
-      const audio = new Audio();
-      audio.src = url;
-      audio.crossOrigin = 'anonymous';
+// Group words into readable subtitle chunks
+function buildSubtitlesFromWords(words) {
+  const MAX_WORDS = 7;
+  const MAX_DURATION = 3.5; // seconds
+  const subtitleChunks = [];
+  let chunk = [];
+  let chunkStart = null;
 
-      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      const dest = audioCtx.createMediaStreamDestination();
+  words.forEach((w, i) => {
+    const word = w.word?.trim() || w.text?.trim() || '';
+    if (!word) return;
 
-      await new Promise(r => { audio.oncanplaythrough = r; audio.load(); });
+    if (chunkStart === null) chunkStart = w.start;
+    chunk.push(word);
 
-      const source = audioCtx.createMediaElementSource(audio);
-      source.connect(dest);
-      source.connect(audioCtx.destination); // keep playing but muted
-      audio.muted = true;
+    const duration = w.end - chunkStart;
+    const isLast = i === words.length - 1;
+    const shouldBreak = chunk.length >= MAX_WORDS || duration >= MAX_DURATION || isLast;
 
-      const recorder = new MediaRecorder(dest.stream, { mimeType: 'audio/webm;codecs=opus' });
-      const chunks = [];
-      recorder.ondataavailable = e => chunks.push(e.data);
-      recorder.onstop = () => {
-        const blob = new Blob(chunks, { type: 'audio/webm' });
-        URL.revokeObjectURL(url);
-        resolve(blob);
-      };
-
-      recorder.start();
-      audio.play();
-      audio.onended = () => { recorder.stop(); audioCtx.close(); };
-    } catch (e) {
-      // Fallback: just send the video file directly (Groq handles it)
-      resolve(new Blob([file], { type: 'audio/webm' }));
+    if (shouldBreak && chunk.length > 0) {
+      subtitleChunks.push({
+        id: subtitleChunks.length,
+        start: parseFloat(chunkStart.toFixed(3)),
+        end: parseFloat(w.end.toFixed(3)),
+        text: chunk.join(' ')
+      });
+      chunk = [];
+      chunkStart = null;
     }
   });
+
+  return subtitleChunks;
 }
 
 // ─────────────────────────────────────────
