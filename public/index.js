@@ -644,8 +644,11 @@
             </select>
           </div>
           <div class="form-group">
-            <label>Groq API Key</label>
-            <input type="text" id="apiKeyInput" placeholder="gsk_..." value="" placeholder="gsk_..." />
+            <label>API Key</label>
+            <div style="display:flex;align-items:center;gap:8px;padding:9px 12px;background:rgba(0,229,176,0.06);border:1px solid rgba(0,229,176,0.25);border-radius:8px;">
+              <span style="color:var(--accent3);font-size:1rem">🔒</span>
+              <span style="font-size:0.8rem;color:var(--accent3)">Secured via environment variable</span>
+            </div>
           </div>
           <div id="progressWrap" class="progress-wrap" style="display:none">
             <div class="progress-bar-bg"><div class="progress-bar-fill" id="progressFill"></div></div>
@@ -875,9 +878,6 @@ function onTimeUpdate() {
 async function generateSubtitles() {
   if (!videoFile) return;
 
-  const apiKey = document.getElementById('apiKeyInput').value.trim() || GROQ_KEY_FALLBACK;
-  if (!apiKey) { showToast('Please enter your Groq API key.', 'error'); return; }
-
   const btn = document.getElementById('generateBtn');
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner"></span> Generating…';
@@ -899,9 +899,9 @@ async function generateSubtitles() {
 
     showProgress(true, 'Transcribing with Whisper AI…', 55);
 
-    const res = await fetch('https://subgen.damorsumit2000.workers.dev/openai/v1/audio/transcriptions', {
+    const res = await fetch('/proxy/audio/transcriptions', {
       method: 'POST',
-      headers: { 'Authorization': 'Bearer ' + apiKey },
+      headers: {},
       body: formData
     });
 
@@ -1076,7 +1076,6 @@ function fmtTimeSRT(s) {
 // ─────────────────────────────────────────
 async function translateSubtitles() {
   if (!subtitles.length) { showToast('Generate subtitles first!', 'error'); return; }
-  const apiKey = document.getElementById('apiKeyInput').value.trim() || GROQ_KEY_FALLBACK;
   const langName = LANGUAGES.find(l => l.code === selectedLang)?.label || selectedLang;
 
   const btn = document.getElementById('translateBtn');
@@ -1097,9 +1096,9 @@ async function translateSubtitles() {
       const texts = chunk.map((s, idx) => `${idx+1}. ${s.text}`).join('\n');
       const prompt = `Translate the following numbered subtitles to ${langName}. Return ONLY the translated lines in the same numbered format. Do not add explanations.\n\n${texts}`;
 
-      const res = await fetch('https://subgen.damorsumit2000.workers.dev/openai/v1/chat/completions', {
+      const res = await fetch('/proxy/chat/completions', {
         method: 'POST',
-        headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model: 'llama3-70b-8192',
           messages: [{ role: 'user', content: prompt }],
