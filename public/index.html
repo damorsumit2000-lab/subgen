@@ -258,35 +258,47 @@ header{
 .video-wrap{
   position:relative;
   background:#000;
+  /* aspect-ratio is set dynamically by JS after metadata loads */
   aspect-ratio:16/9;
+  max-height:80vh;
+  display:flex;align-items:center;justify-content:center;
+  overflow:hidden;
 }
-#mainVideo{width:100%;height:100%;display:block;object-fit:contain}
+#mainVideo{
+  width:100%;height:100%;display:block;
+  object-fit:contain;
+  /* video sits inside the black box letterboxed */
+}
 
-/* ── SUBTITLE OVERLAY ── */
+/* ── SUBTITLE OVERLAY ─────────────────────────────────────────────
+   Subtitles must stay INSIDE the actual video frame, not in the
+   letterbox / pillarbox bars. We use a child element (#subInner)
+   that mirrors the real rendered video area, computed by JS.        */
 #subOverlay{
   position:absolute;
-  bottom:10%;
-  left:50%;transform:translateX(-50%);
-  width:90%;text-align:center;
+  /* width/height/top/left overridden by JS to match actual video rect */
   pointer-events:none;z-index:5;
-  transition:bottom .1s;
+  display:flex;align-items:flex-end;justify-content:center;
+  /* default bottom-aligned; overridden by applyStyle() */
 }
 #subText{
   display:inline-block;
-  background:rgba(0,0,0,0.75);
+  background:rgba(0,0,0,0.78);
   color:#fff;
-  font-size:clamp(1rem,2.5vw,1.3rem);
+  /* font-size is set relative to actual video height by JS */
+  font-size:1.2rem;
   font-weight:700;
-  padding:8px 20px;
-  border-radius:8px;
+  padding:.45em .9em;
+  border-radius:7px;
   letter-spacing:0.3px;
-  line-height:1.6;
-  max-width:100%;
-  backdrop-filter:blur(6px);
-  text-shadow:0 2px 6px rgba(0,0,0,.8);
+  line-height:1.55;
+  max-width:96%;
+  backdrop-filter:blur(4px);
+  text-shadow:0 1px 5px rgba(0,0,0,.9);
   white-space:normal;word-break:break-word;text-align:center;
   border-bottom:3px solid var(--gold);
-  transition:opacity .15s;
+  transition:opacity .12s;
+  margin-bottom:4%;
 }
 #subText:empty{display:none}
 
@@ -667,15 +679,19 @@ header{
 
     <!-- DOWNLOAD SECTION -->
     <div class="dl-section" id="dlSection">
-      <h3>📥 Export</h3>
-      <p>Download soft subtitles (toggle in VLC/YouTube) or burn them permanently into the video.</p>
+      <h3>📥 Export Your Subtitles</h3>
+      <p>Choose how to save your subtitles. Soft subs can be toggled on/off in any player. Burnt-in subs are permanent.</p>
       <div class="dl-btns">
-        <button class="btn btn-teal" onclick="dlSRT()">📄 SRT File</button>
-        <button class="btn btn-ghost" onclick="dlVTT()">📄 VTT File</button>
-        <button class="btn btn-ghost" onclick="dlVideoAndSRT()">📦 Video + SRT</button>
-        <button class="btn btn-violet" onclick="startBurnIn()">🔥 Burn Into Video</button>
+        <button class="btn btn-teal" onclick="dlSRT()">📄 Download SRT</button>
+        <button class="btn btn-ghost" onclick="dlVTT()">📄 Download VTT</button>
+        <button class="btn btn-ghost" onclick="dlVideoAndSRT()">📦 Video + SRT (Soft Subs)</button>
+        <button class="btn btn-violet" onclick="startBurnIn()">🔥 Download Video + Burn-In Subs</button>
       </div>
-      <p class="dl-note">💡 <strong>Soft subs</strong>: SRT/VTT can be toggled on/off in VLC, YouTube, etc. &nbsp;|&nbsp; <strong>Burn-in</strong>: Permanently embedded, visible everywhere.</p>
+      <p class="dl-note">
+        💡 <strong style="color:var(--text)">SRT / VTT</strong> — Subtitle file only. Load in VLC: <em>Subtitle → Add Subtitle File</em><br>
+        💡 <strong style="color:var(--text)">Video + SRT</strong> — Both files with same name; VLC auto-loads subs from same folder<br>
+        💡 <strong style="color:var(--text)">Burn-In</strong> — Subtitles permanently embedded into the video pixels
+      </p>
     </div>
   </div>
 
@@ -830,6 +846,9 @@ function init() {
   zone.addEventListener('drop', e => { e.preventDefault(); zone.classList.remove('dragover'); if (e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]); });
   document.getElementById('fileInput').addEventListener('change', e => { if (e.target.files[0]) loadFile(e.target.files[0]); });
 
+  // Reposition overlay on resize
+  window.addEventListener('resize', () => { if (videoFile) positionOverlay(); });
+
   // Video events
   const v = document.getElementById('mainVideo');
   v.addEventListener('timeupdate', onTime);
@@ -846,7 +865,15 @@ function loadFile(f) {
   if (!f.type.startsWith('video/')) { toast('Please upload a valid video file.', 'err'); return; }
   if (f.size > 25 * 1024 * 1024) { toast('File exceeds 25 MB limit.', 'err'); return; }
   videoFile = f;
-  document.getElementById('mainVideo').src = URL.createObjectURL(f);
+  const vid = document.getElementById('mainVideo');
+  vid.src = URL.createObjectURL(f);
+
+  // Once metadata loads, set proper aspect ratio + position overlay
+  vid.onloadedmetadata = () => {
+    positionOverlay();
+    applyStyle();
+  };
+
   document.getElementById('fileName').textContent = f.name;
   document.getElementById('fileSize').textContent = fmtBytes(f.size);
   document.getElementById('heroSection').style.display = 'none';
@@ -876,17 +903,51 @@ function fmtBytes(b) {
   return (b/1048576).toFixed(2) + ' MB';
 }
 
+// ─── OVERLAY POSITIONING ───
+// Called on: metadata load, resize, applyStyle
+// Computes the actual rendered video rectangle (letterboxed inside .video-wrap)
+// and positions #subOverlay to exactly match it.
+function positionOverlay() {
+  const vid = document.getElementById('mainVideo');
+  const wrap = document.querySelector('.video-wrap');
+  const ov = document.getElementById('subOverlay');
+  if (!vid.videoWidth) return;
+
+  const wW = wrap.clientWidth;
+  const wH = wrap.clientHeight;
+  const vW = vid.videoWidth;
+  const vH = vid.videoHeight;
+
+  const scale = Math.min(wW / vW, wH / vH);
+  const rW = vW * scale;   // actual rendered video width
+  const rH = vH * scale;   // actual rendered video height
+  const rX = (wW - rW) / 2;  // left offset (pillarbox)
+  const rY = (wH - rH) / 2;  // top offset (letterbox)
+
+  ov.style.left = rX + 'px';
+  ov.style.top = rY + 'px';
+  ov.style.width = rW + 'px';
+  ov.style.height = rH + 'px';
+  ov.style.transform = 'none';
+
+  // Scale font relative to video height (not viewport)
+  const baseFontPx = Math.max(14, rH * 0.042);
+  document.getElementById('subText').style.fontSize =
+    (baseFontPx * (parseInt(document.getElementById('sSize').value) / 22)).toFixed(1) + 'px';
+
+  // Update aspect ratio of wrapper to match video
+  wrap.style.aspectRatio = vW + '/' + vH;
+}
+
 // ─── STYLE ───
 function applyStyle() {
   const el = document.getElementById('subText');
-  const size = document.getElementById('sSize').value;
   const col = document.getElementById('sColor').value;
   const bg = document.getElementById('sBg').value;
   const alpha = parseInt(document.getElementById('sBgAlpha').value) / 100;
   const font = document.getElementById('sFont').value;
   const pos = document.getElementById('sPos').value;
 
-  el.style.fontSize = size + 'px';
   el.style.color = col;
   el.style.fontFamily = font;
 
@@ -896,9 +957,20 @@ function applyStyle() {
   el.style.background = `rgba(${r},${g},${bv},${alpha})`;
 
   const ov = document.getElementById('subOverlay');
-  ov.style.bottom = pos === 'bottom' ? '10%' : pos === 'top' ? 'auto' : '50%';
-  ov.style.top = pos === 'top' ? '5%' : pos === 'middle' ? '50%' : 'auto';
-  ov.style.transform = pos === 'middle' ? 'translate(-50%,-50%)' : 'translateX(-50%)';
+  // Vertical alignment inside the overlay box
+  if (pos === 'bottom') {
+    ov.style.alignItems = 'flex-end';
+    el.style.marginBottom = '4%'; el.style.marginTop = '';
+  } else if (pos === 'top') {
+    ov.style.alignItems = 'flex-start';
+    el.style.marginTop = '4%'; el.style.marginBottom = '';
+  } else {
+    ov.style.alignItems = 'center';
+    el.style.marginTop = ''; el.style.marginBottom = '';
+  }
+
+  // Re-compute font size with new slider value
+  positionOverlay();
 }
 
 // ─── TIME UPDATE ───
@@ -938,43 +1010,57 @@ async function generateSubtitles() {
   const btn = document.getElementById('genBtn');
   btn.disabled = true;
   btn.innerHTML = '<span class="spin"></span> Generating…';
-  setGenProg(true, 'Preparing file…', 10);
+  setGenProg(true, 'Extracting audio…', 5);
 
   try {
     const lang = document.getElementById('vidLang').value;
-    const ext = videoFile.name.split('.').pop().toLowerCase() || 'mp4';
-    const ok = ['mp4','mpeg','mpga','mp3','m4a','wav','webm','ogg','flac'];
-    const fileExt = ok.includes(ext) ? ext : 'mp4';
+
+    // ── STEP 1: Extract clean mono audio via Web Audio API ──
+    // Sending raw audio (not the whole video) is far more accurate
+    // because Whisper doesn't have to guess the codec.
+    let audioBlob;
+    try {
+      audioBlob = await extractAudioAsWav(videoFile, (p) => {
+        setGenProg(true, 'Extracting audio… ' + p + '%', 5 + p * 0.25);
+      });
+    } catch(e) {
+      // Fallback: send video directly if AudioContext fails
+      console.warn('Audio extraction failed, falling back to direct video upload:', e);
+      audioBlob = videoFile;
+    }
+
+    setGenProg(true, 'Sending to Whisper AI…', 32);
 
     const fd = new FormData();
-    fd.append('file', videoFile, `video.${fileExt}`);
+    fd.append('file', audioBlob, 'audio.wav');
 
-    // whisper-large-v3 = highest accuracy, best for Indian languages & mixed content
+    // whisper-large-v3 = highest accuracy model available
     fd.append('model', 'whisper-large-v3');
     fd.append('response_format', 'verbose_json');
-    fd.append('temperature', '0');
+    fd.append('temperature', '0');        // 0 = deterministic, no hallucinations
     fd.append('timestamp_granularities[]', 'word');
     fd.append('timestamp_granularities[]', 'segment');
 
+    // Always set language when known — massive accuracy improvement
     if (lang) fd.append('language', lang);
 
-    // Language-specific prompts dramatically improve accuracy for non-English
+    // Carefully crafted prompts per language
+    // The prompt primes Whisper's decoder with the correct script/vocabulary
     const prompts = {
-      hi: 'यह वीडियो हिंदी में है। हर शब्द को सटीक रूप से लिखें, विशेष रूप से नाम और तकनीकी शब्द।',
-      bn: 'এই ভিডিওটি বাংলায়। প্রতিটি শব্দ সঠিকভাবে লিখুন।',
-      ta: 'இந்த வீடியோ தமிழில் உள்ளது. ஒவ்வொரு வார்த்தையும் துல்லியமாக எழுதுக.',
-      te: 'ఈ వీడియో తెలుగులో ఉంది. ప్రతి పదాన్ని ఖచ్చితంగా రాయండి.',
-      mr: 'हा व्हिडिओ मराठीत आहे. प्रत्येक शब्द अचूकपणे लिहा.',
-      gu: 'આ વિડિઓ ગુજરાતીમાં છે. દરેક શબ્દ સચોટ રીતે લખો.',
-      kn: 'ಈ ವೀಡಿಯೊ ಕನ್ನಡದಲ್ಲಿದೆ. ಪ್ರತಿ ಪದವನ್ನು ನಿಖರವಾಗಿ ಬರೆಯಿರಿ.',
-      ml: 'ഈ വീഡിയോ മലയാളത്തിലാണ്. ഓരോ വാക്കും കൃത്യമായി എഴുതുക.',
-      pa: 'ਇਹ ਵੀਡੀਓ ਪੰਜਾਬੀ ਵਿੱਚ ਹੈ। ਹਰ ਸ਼ਬਦ ਸਹੀ ਲਿਖੋ।',
-      ur: 'یہ ویڈیو اردو میں ہے۔ ہر لفظ درست لکھیں۔',
+      hi: 'हिंदी ट्रांसक्रिप्शन। यह एक हिंदी वीडियो है। सभी शब्द हिंदी में लिखें।',
+      bn: 'বাংলা ট্রান্সক্রিপশন। এটি একটি বাংলা ভিডিও।',
+      ta: 'தமிழ் டிரான்ஸ்கிரிப்ஷன். இந்த வீடியோ தமிழில்.',
+      te: 'తెలుగు ట్రాన్స్క్రిప్షన్. ఈ వీడియో తెలుగులో.',
+      mr: 'मराठी ट्रान्सक्रिप्शन. हे मराठी व्हिडिओ आहे.',
+      gu: 'ગુજરાતી ટ્રાન્સ્ક્રિપ્શન. આ ગુજરાતી વિડિઓ.',
+      kn: 'ಕನ್ನಡ ಟ್ರಾನ್ಸ್‌ಕ್ರಿಪ್ಷನ್. ಈ ವೀಡಿಯೊ ಕನ್ನಡದಲ್ಲಿ.',
+      ml: 'മലയാളം ട്രാൻസ്ക്രിപ്ഷൻ. ഈ വീഡിയോ മലയാളത്തിൽ.',
+      pa: 'ਪੰਜਾਬੀ ਟਰਾਂਸਕ੍ਰਿਪਸ਼ਨ. ਇਹ ਪੰਜਾਬੀ ਵੀਡੀਓ ਹੈ।',
+      ur: 'اردو ٹرانسکرپشن۔ یہ اردو ویڈیو ہے۔',
+      en: 'English transcription. Please transcribe all words accurately including names and proper nouns.',
     };
-    const prompt = prompts[lang] || 'Transcribe every word with maximum accuracy. Include proper nouns, names, and technical terms exactly as spoken.';
+    const prompt = prompts[lang] || 'Transcribe accurately. Preserve all proper nouns and names exactly as spoken.';
     fd.append('prompt', prompt);
-
-    setGenProg(true, 'Sending to Groq Whisper AI…', 35);
 
     const res = await fetch('/proxy/audio/transcriptions', {
       method: 'POST', headers: {}, body: fd
@@ -986,23 +1072,32 @@ async function generateSubtitles() {
     }
 
     const data = await res.json();
-    setGenProg(true, 'Building subtitle timeline…', 80);
+    setGenProg(true, 'Building subtitle timeline…', 75);
 
     const words = data.words || [];
     const segs = data.segments || [];
 
+    let rawSubs;
     if (words.length > 0) {
-      subtitles = buildFromWords(words);
+      rawSubs = buildFromWords(words);
     } else if (segs.length > 0) {
-      subtitles = segs.map((s, i) => ({
-        id: i,
-        start: +s.start.toFixed(3),
-        end: +s.end.toFixed(3),
-        text: s.text.trim()
+      rawSubs = segs.map((s, i) => ({
+        id: i, start: +s.start.toFixed(3),
+        end: +s.end.toFixed(3), text: s.text.trim()
       }));
     } else {
-      throw new Error('No speech detected.');
+      throw new Error('No speech detected. Make sure the video has audio.');
     }
+
+    // ── STEP 2: LLM correction pass for non-English ──
+    // Whisper sometimes transcribes Indian languages in Roman script
+    // or produces garbled text. We ask the LLM to fix it.
+    if (lang && lang !== 'en' && rawSubs.length > 0) {
+      setGenProg(true, 'AI correction pass…', 85);
+      rawSubs = await correctWithLLM(rawSubs, lang);
+    }
+
+    subtitles = rawSubs;
 
     setGenProg(true, 'Done!', 100);
     setTimeout(() => setGenProg(false), 900);
@@ -1020,6 +1115,125 @@ async function generateSubtitles() {
   }
   btn.disabled = false;
   btn.innerHTML = '✨ Re-generate';
+}
+
+// ─── EXTRACT AUDIO AS WAV ───
+// Decodes video in browser, resamples to 16kHz mono WAV
+// Whisper is trained on 16kHz mono — this is the ideal input format
+async function extractAudioAsWav(file, onProgress) {
+  const arrayBuffer = await file.arrayBuffer();
+  onProgress(20);
+
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  const ctx = new AudioCtx({ sampleRate: 16000 });
+
+  const decoded = await ctx.decodeAudioData(arrayBuffer);
+  onProgress(70);
+
+  // Mix down to mono
+  const numSamples = decoded.length;
+  const mono = new Float32Array(numSamples);
+  const nCh = decoded.numberOfChannels;
+  for (let ch = 0; ch < nCh; ch++) {
+    const data = decoded.getChannelData(ch);
+    for (let i = 0; i < numSamples; i++) mono[i] += data[i] / nCh;
+  }
+  ctx.close();
+  onProgress(90);
+
+  // Encode as 16-bit PCM WAV
+  const wav = encodeWAV(mono, 16000);
+  onProgress(100);
+  return new Blob([wav], { type: 'audio/wav' });
+}
+
+function encodeWAV(samples, sampleRate) {
+  const buffer = new ArrayBuffer(44 + samples.length * 2);
+  const view = new DataView(buffer);
+  const writeStr = (off, str) => { for (let i = 0; i < str.length; i++) view.setUint8(off + i, str.charCodeAt(i)); };
+  writeStr(0, 'RIFF');
+  view.setUint32(4, 36 + samples.length * 2, true);
+  writeStr(8, 'WAVE'); writeStr(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);   // PCM
+  view.setUint16(22, 1, true);   // mono
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);   // block align
+  view.setUint16(34, 16, true);  // bits per sample
+  writeStr(36, 'data');
+  view.setUint32(40, samples.length * 2, true);
+  let off = 44;
+  for (let i = 0; i < samples.length; i++, off += 2) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+  }
+  return buffer;
+}
+
+// ─── LLM CORRECTION PASS ───
+// Sends Whisper output to LLaMA to fix garbled/romanised text
+async function correctWithLLM(subs, lang) {
+  try {
+    const langNames = {
+      hi:'Hindi',bn:'Bengali',ta:'Tamil',te:'Telugu',mr:'Marathi',
+      gu:'Gujarati',kn:'Kannada',ml:'Malayalam',pa:'Punjabi',ur:'Urdu',
+      fr:'French',es:'Spanish',de:'German',ja:'Japanese',ko:'Korean',
+      zh:'Chinese',ar:'Arabic',ru:'Russian',tr:'Turkish',
+    };
+    const langName = langNames[lang] || lang;
+
+    // Process in batches of 30
+    const BATCH = 30;
+    const result = [...subs];
+    for (let i = 0; i < result.length; i += BATCH) {
+      const chunk = result.slice(i, i + BATCH);
+      const input = chunk.map((s, j) => `${j+1}. ${s.text}`).join('\n');
+
+      const systemPrompt = `You are a ${langName} subtitle corrector. 
+The subtitles below were auto-transcribed from a ${langName} audio and may contain:
+- Wrong words that sound similar but aren't correct
+- Roman/English transliteration instead of native script
+- Mixed languages where everything should be in ${langName}
+- Minor transcription errors
+
+Fix ONLY genuine errors. Do NOT translate. Keep the same language (${langName}).
+Respond with ONLY numbered lines in exactly this format:
+1. corrected text
+2. corrected text
+...`;
+
+      const res = await fetch('/proxy/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'llama3-70b-8192',
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: input }
+          ],
+          temperature: 0.1, max_tokens: 2000
+        })
+      });
+
+      if (!res.ok) return result; // silently skip on error, keep original
+
+      const data = await res.json();
+      const lines = (data.choices?.[0]?.message?.content || '').split('\n');
+      lines.forEach(line => {
+        const m = line.match(/^(\d+)\.\s+(.+)$/);
+        if (m) {
+          const idx = parseInt(m[1]) - 1;
+          if (chunk[idx]) chunk[idx].text = m[2].trim();
+        }
+      });
+      chunk.forEach((s, j) => { result[i + j].text = s.text; });
+    }
+    return result;
+  } catch(e) {
+    console.warn('LLM correction failed, using raw Whisper output:', e);
+    return subs; // fall back to original
+  }
 }
 
 // ─── BUILD SUBS FROM WORDS ───
@@ -1299,6 +1513,9 @@ async function renderBurnIn() {
     const b2 = parseInt(bg.slice(5,7),16);
 
     const dur = rv.duration;
+    // Scale font relative to video HEIGHT (handles portrait correctly)
+    // baseFontPx at size=22 slider is ~4.2% of height
+    const baseFontPx = Math.max(18, H * 0.042) * (size / 22);
 
     rec.start(200);
     rv.currentTime = 0;
@@ -1314,7 +1531,7 @@ async function renderBurnIn() {
         const sub = subtitles.find(s => t >= s.start - 0.04 && t <= s.end + 0.04);
 
         if (sub) {
-          const fs = size * (W / 960);
+          const fs = baseFontPx;
           ctx.font = `700 ${fs}px "${font}"`;
           const lines = canvasWrap(ctx, sub.text, W * 0.84);
           const lh = fs * 1.5;
@@ -1323,8 +1540,8 @@ async function renderBurnIn() {
           const mw = Math.max(...lines.map(l => ctx.measureText(l).width));
 
           let by;
-          if (pos === 'bottom') by = H * 0.88 - th;
-          else if (pos === 'top') by = H * 0.05;
+          if (pos === 'bottom') by = H * 0.90 - th;
+          else if (pos === 'top') by = H * 0.04;
           else by = H * 0.5 - th / 2;
 
           ctx.fillStyle = `rgba(${r2},${g2},${b2},${alpha})`;
