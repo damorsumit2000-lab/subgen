@@ -7,6 +7,7 @@
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎬</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Cabinet+Grotesk:wght@400;500;700;800;900&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
 <style>
 :root {
   --ink: #0a0a0f;
@@ -724,14 +725,14 @@ header{
           </button>
           <button class="dl-btn-card dl-btn-fire" id="dlBtnBurnIn" onclick="startBurnIn()" disabled>
             <span class="dl-icon">🔥</span>
-            <span class="dl-label">Burn Into Video</span>
-            <span class="dl-sub">Permanently embed</span>
+            <span class="dl-label">Embed in Video</span>
+            <span class="dl-sub">MKV · no re-encode</span>
           </button>
         </div>
         <div id="dlHint" style="margin-top:10px;padding:9px 10px;background:var(--ink3);border-radius:8px;font-size:0.7rem;color:var(--text3);line-height:1.6;display:none">
           <strong style="color:var(--text2)">SRT/VTT</strong> — Toggle on/off in VLC, YouTube, any player<br>
           <strong style="color:var(--text2)">Video+SRT</strong> — Keep both files in same folder; VLC auto-loads<br>
-          <strong style="color:var(--text2)">Burn-In</strong> — Subs baked into pixels; visible everywhere
+          <strong style="color:var(--text2)">Embed in Video</strong> — Subtitles muxed into MKV via FFmpeg; toggleable in VLC, no quality loss
         </div>
       </div>
     </div>
@@ -826,8 +827,8 @@ header{
 <div class="modal-bg" id="burnModal">
   <div class="modal-box">
     <div class="modal-spinner"></div>
-    <h3>Burning Subtitles</h3>
-    <p>Rendering in real-time with audio preserved. Download starts automatically when done.</p>
+    <h3>Embedding Subtitles</h3>
+    <p>Muxing subtitles into video using FFmpeg — zero re-encoding, original quality & audio preserved. Takes just seconds.</p>
     <div class="modal-prog-bg"><div class="modal-prog-fill" id="burnFill"></div></div>
     <div class="modal-label" id="burnLabel">Preparing…</div>
     <button class="btn btn-ghost" style="margin-top:14px;width:100%" onclick="cancelBurn()">Cancel</button>
@@ -1521,14 +1522,14 @@ function dlVideoAndSRT() {
   }, 600);
 }
 
-// ─── BURN-IN ───
+// ─── BURN-IN / MUX ───
 function startBurnIn() {
   if (!subtitles.length) { toast('Generate subtitles first.', 'err'); return; }
   if (!videoFile) { toast('No video loaded.', 'err'); return; }
   burnCancelled = false;
   document.getElementById('burnModal').classList.add('show');
   setBurnProg(0, 'Starting…');
-  renderBurnIn();
+  muxSubsIntoVideo();
 }
 
 function cancelBurn() {
@@ -1536,157 +1537,81 @@ function cancelBurn() {
   document.getElementById('burnModal').classList.remove('show');
 }
 
-async function renderBurnIn() {
+async function muxSubsIntoVideo() {
   try {
-    setBurnProg(5, 'Loading video…');
+    setBurnProg(5, 'Loading FFmpeg…');
 
-    const rv = document.createElement('video');
-    rv.src = URL.createObjectURL(videoFile);
-    rv.muted = false;
-    rv.playsInline = true;
-    rv.preload = 'auto';
-
-    await new Promise((res, rej) => {
-      rv.onloadeddata = res;
-      rv.onerror = () => rej(new Error('Video failed to load'));
-      rv.load();
+    // Load FFmpeg WASM (runs entirely in browser, no server needed)
+    const { createFFmpeg, fetchFile } = FFmpeg;
+    const ffmpeg = createFFmpeg({
+      log: false,
+      corePath: 'https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js',
     });
 
-    const W = rv.videoWidth || 1280;
-    const H = rv.videoHeight || 720;
-    const dur = rv.duration;
-    if (!dur || !isFinite(dur)) throw new Error('Cannot read video duration.');
+    await ffmpeg.load();
+    if (burnCancelled) throw new Error('Cancelled');
 
-    // ── CANVAS for video frames ──
-    const canvas = document.createElement('canvas');
-    canvas.width = W; canvas.height = H;
-    const ctx = canvas.getContext('2d');
+    setBurnProg(20, 'Preparing files…');
 
-    // ── AUDIO: capture from video element directly ──
-    const AudioCtx = window.AudioContext || window.webkitAudioContext;
-    const audioCtx = new AudioCtx();
-    const audioSrc = audioCtx.createMediaElementSource(rv);
-    const audioDest = audioCtx.createMediaStreamDestination();
-    audioSrc.connect(audioDest);
-    audioSrc.connect(audioCtx.destination); // also play audibly during render
+    // Write video into FFmpeg virtual FS
+    const ext = videoFile.name.split('.').pop().toLowerCase() || 'mp4';
+    const inputName = `input.${ext}`;
+    ffmpeg.FS('writeFile', inputName, await fetchFile(videoFile));
 
-    // ── COMBINED STREAM: canvas video + real audio ──
-    const canvasStream = canvas.captureStream(30);
-    const combined = new MediaStream([
-      ...canvasStream.getVideoTracks(),
-      ...audioDest.stream.getAudioTracks()
-    ]);
+    // Write SRT into FFmpeg virtual FS
+    const srtContent = buildSRT();
+    ffmpeg.FS('writeFile', 'subs.srt', new TextEncoder().encode(srtContent));
 
-    const mime = ['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm']
-      .find(m => MediaRecorder.isTypeSupported(m)) || 'video/webm';
+    if (burnCancelled) throw new Error('Cancelled');
+    setBurnProg(35, 'Muxing subtitles…');
 
-    const chunks = [];
-    const rec = new MediaRecorder(combined, { mimeType: mime, videoBitsPerSecond: 8_000_000 });
-    rec.ondataavailable = e => { if (e.data && e.data.size > 0) chunks.push(e.data); };
-
-    // Style snapshot
-    const size  = parseInt(document.getElementById('sSize').value);
-    const col   = document.getElementById('sColor').value;
-    const bg    = document.getElementById('sBg').value;
-    const alpha = parseInt(document.getElementById('sBgAlpha').value) / 100;
-    const font  = document.getElementById('sFont').value.replace(/'/g,'').split(',')[0].trim();
-    const pos   = document.getElementById('sPos').value;
-    const r2 = parseInt(bg.slice(1,3),16);
-    const g2 = parseInt(bg.slice(3,5),16);
-    const b2 = parseInt(bg.slice(5,7),16);
-    const baseFontPx = Math.max(18, H * 0.042) * (size / 22);
-
-    function drawSubtitle(t) {
-      const sub = subtitles.find(s => t >= s.start - 0.04 && t <= s.end + 0.04);
-      if (!sub) return;
-      const fs = baseFontPx;
-      ctx.font = `700 ${fs}px "${font}"`;
-      const lines = canvasWrap(ctx, sub.text, W * 0.84);
-      const lh = fs * 1.55;
-      const th = lines.length * lh;
-      const px = fs * 0.8, py = fs * 0.4;
-      const mw = Math.max(...lines.map(l => ctx.measureText(l).width));
-      const by = pos === 'top' ? H*0.04 : pos==='middle' ? H*0.5-th/2 : H*0.90-th;
-      const bx = (W - mw - px*2) / 2;
-      ctx.fillStyle = `rgba(${r2},${g2},${b2},${alpha})`;
-      ctx.beginPath();
-      if (ctx.roundRect) ctx.roundRect(bx, by-py, mw+px*2, th+py*2, 8);
-      else ctx.rect(bx, by-py, mw+px*2, th+py*2);
-      ctx.fill();
-      ctx.fillStyle = col;
-      ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-      lines.forEach((ln, i) => ctx.fillText(ln, W/2, by + i*lh));
-    }
-
-    // ── Wire onstop BEFORE start ──
-    let recStopped = false;
-    const finishPromise = new Promise((resolve, reject) => {
-      rec.onstop = () => {
-        if (burnCancelled) { reject(new Error('Cancelled')); return; }
-        setBurnProg(100, 'Saving…');
-        const blob = new Blob(chunks, { type: mime });
-        dlBlob(blob, getBaseName() + '_subtitled.webm');
-        audioCtx.close();
-        URL.revokeObjectURL(rv.src);
-        resolve();
-      };
+    // FFmpeg progress
+    ffmpeg.setProgress(({ ratio }) => {
+      if (ratio >= 0 && ratio <= 1) {
+        setBurnProg(35 + Math.round(ratio * 60), `Processing… ${Math.round(ratio * 100)}%`);
+      }
     });
 
-    // ── Start recording ──
-    rec.start(100); // collect data every 100ms
+    // Mux: copy video+audio stream untouched, add SRT as subtitle track
+    // -c copy = zero re-encoding = original quality, original speed, full audio
+    // The subtitle track can be toggled in VLC/players, but is embedded in the file
+    const outName = 'output.mkv'; // MKV supports SRT natively without re-encode
+    await ffmpeg.run(
+      '-i', inputName,
+      '-i', 'subs.srt',
+      '-c', 'copy',           // copy video + audio — NO re-encoding, NO quality loss
+      '-c:s', 'srt',          // subtitle codec
+      '-map', '0',            // all streams from video
+      '-map', '1',            // subtitle stream
+      '-metadata:s:s:0', 'language=hin', // mark subtitle language
+      '-y',
+      outName
+    );
 
-    // Seek to start, then play
-    rv.currentTime = 0;
-    await new Promise(r => { rv.onseeked = r; });
-    await rv.play();
+    if (burnCancelled) throw new Error('Cancelled');
+    setBurnProg(97, 'Saving…');
 
-    // ── RAF draw loop ──
-    let rafActive = true;
-    const drawLoop = () => {
-      if (!rafActive) return;
-      ctx.drawImage(rv, 0, 0, W, H);
-      drawSubtitle(rv.currentTime);
-      const pct = Math.min(97, Math.round((rv.currentTime / dur) * 94) + 3);
-      setBurnProg(pct, `Rendering ${ft(rv.currentTime)} / ${ft(dur)}`);
-      requestAnimationFrame(drawLoop);
-    };
-    requestAnimationFrame(drawLoop);
+    const data = ffmpeg.FS('readFile', outName);
+    const blob = new Blob([data.buffer], { type: 'video/x-matroska' });
+    dlBlob(blob, getBaseName() + '_with_subs.mkv');
 
-    // ── Stop when video ends ──
-    const stopAll = () => {
-      if (recStopped) return;
-      recStopped = true;
-      rafActive = false;
-      rv.pause();
-      // Flush final frame
-      ctx.drawImage(rv, 0, 0, W, H);
-      drawSubtitle(rv.currentTime);
-      setTimeout(() => {
-        if (rec.state !== 'inactive') rec.stop();
-      }, 250);
-    };
+    // Cleanup
+    ffmpeg.FS('unlink', inputName);
+    ffmpeg.FS('unlink', 'subs.srt');
+    ffmpeg.FS('unlink', outName);
 
-    rv.onended = stopAll;
-
-    // Safety net: if onended never fires, stop after duration + 4s
-    const safety = setTimeout(stopAll, (dur + 4) * 1000);
-
-    // Also stop on cancel
-    const cancelCheck = setInterval(() => {
-      if (burnCancelled) { clearInterval(cancelCheck); clearTimeout(safety); stopAll(); }
-    }, 500);
-
-    await finishPromise;
-    clearInterval(cancelCheck);
-    clearTimeout(safety);
-
+    setBurnProg(100, 'Done!');
     document.getElementById('burnModal').classList.remove('show');
-    toast('✅ Burn-in complete! Video downloaded.', 'ok');
+    toast('✅ Downloaded! Open in VLC — subtitles are embedded and toggleable.', 'ok');
 
   } catch(e) {
     document.getElementById('burnModal').classList.remove('show');
-    if (!burnCancelled) toast('Render error: ' + e.message, 'err');
-    console.error('Burn-in error:', e);
+    if (!burnCancelled) {
+      // FFmpeg failed — fall back to just downloading Video + SRT together
+      console.warn('FFmpeg mux failed, falling back to Video+SRT:', e);
+      toast('⚠️ Mux failed — downloading Video + SRT instead. Keep both in the same folder.', '');
+      dlVideoAndSRT();
+    }
   }
 }
 
