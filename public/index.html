@@ -365,20 +365,35 @@ header{
 }
 .btn-violet:hover{transform:translateY(-1px)}
 
-/* ── DOWNLOAD SECTION ── */
-.dl-section{
-  display:none;margin-top:16px;
-  background:linear-gradient(135deg,rgba(245,200,66,0.06),rgba(0,212,170,0.04));
-  border:1px solid rgba(245,200,66,0.15);
-  border-radius:var(--r2);
-  padding:20px;
+/* ── DOWNLOAD CARDS ── */
+.dl-btn-card{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:3px;padding:12px 8px;
+  background:var(--ink3);
+  border:1px solid var(--border);
+  border-radius:10px;cursor:pointer;
+  transition:all .18s;text-align:center;
+  color:var(--text);font-family:'Cabinet Grotesk',sans-serif;
 }
-.dl-section h3{font-size:1rem;font-weight:800;margin-bottom:6px;letter-spacing:-.3px}
-.dl-section p{font-size:0.78rem;color:var(--text2);margin-bottom:14px;line-height:1.5}
-.dl-btns{display:flex;gap:8px;flex-wrap:wrap}
-.dl-note{
-  font-size:0.7rem;color:var(--text3);margin-top:10px;line-height:1.5;
+.dl-btn-card:hover{
+  border-color:var(--gold);
+  background:rgba(245,200,66,0.07);
+  transform:translateY(-1px);
 }
+.dl-btn-card:disabled{opacity:.35;cursor:not-allowed;transform:none;pointer-events:none}
+.dl-btn-card.dl-btn-fire{
+  border-color:rgba(124,106,247,0.3);
+  background:linear-gradient(135deg,rgba(124,106,247,0.08),rgba(96,88,232,0.05));
+}
+.dl-btn-card.dl-btn-fire:hover{
+  border-color:var(--violet);
+  background:rgba(124,106,247,0.14);
+}
+.dl-icon{font-size:1.3rem;line-height:1}
+.dl-label{font-size:0.78rem;font-weight:800;color:var(--text)}
+.dl-sub{font-size:0.65rem;color:var(--text3)}
+.dl-btn-card.dl-btn-fire .dl-label{color:#a89cf7}
+.dl-btn-card.dl-btn-fire .dl-sub{color:rgba(124,106,247,0.6)}
 
 /* ── SIDEBAR ── */
 .sidebar{display:flex;flex-direction:column;gap:14px}
@@ -677,26 +692,49 @@ header{
       </div>
     </div>
 
-    <!-- DOWNLOAD SECTION -->
-    <div class="dl-section" id="dlSection">
-      <h3>📥 Export Your Subtitles</h3>
-      <p>Choose how to save your subtitles. Soft subs can be toggled on/off in any player. Burnt-in subs are permanent.</p>
-      <div class="dl-btns">
-        <button class="btn btn-teal" onclick="dlSRT()">📄 Download SRT</button>
-        <button class="btn btn-ghost" onclick="dlVTT()">📄 Download VTT</button>
-        <button class="btn btn-ghost" onclick="dlVideoAndSRT()">📦 Video + SRT (Soft Subs)</button>
-        <button class="btn btn-violet" onclick="startBurnIn()">🔥 Download Video + Burn-In Subs</button>
-      </div>
-      <p class="dl-note">
-        💡 <strong style="color:var(--text)">SRT / VTT</strong> — Subtitle file only. Load in VLC: <em>Subtitle → Add Subtitle File</em><br>
-        💡 <strong style="color:var(--text)">Video + SRT</strong> — Both files with same name; VLC auto-loads subs from same folder<br>
-        💡 <strong style="color:var(--text)">Burn-In</strong> — Subtitles permanently embedded into the video pixels
-      </p>
-    </div>
   </div>
 
   <!-- SIDEBAR -->
   <div class="sidebar">
+
+    <!-- DOWNLOAD PANEL — always visible in sidebar -->
+    <div class="panel" id="dlSection">
+      <div class="panel-hdr" style="background:linear-gradient(135deg,rgba(245,200,66,0.08),rgba(124,106,247,0.06));border-bottom-color:rgba(245,200,66,0.15)">
+        <h3 style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:1.1rem">📥</span> Export
+        </h3>
+        <span id="dlBadge" style="font-size:0.68rem;padding:3px 9px;border-radius:999px;background:rgba(255,255,255,0.05);color:var(--text3);border:1px solid var(--border)">Generate first</span>
+      </div>
+      <div class="panel-body" style="padding:12px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px" id="dlBtnsGrid">
+          <button class="dl-btn-card" id="dlBtnSRT" onclick="dlSRT()" disabled>
+            <span class="dl-icon">📄</span>
+            <span class="dl-label">SRT File</span>
+            <span class="dl-sub">Soft subtitles</span>
+          </button>
+          <button class="dl-btn-card" id="dlBtnVTT" onclick="dlVTT()" disabled>
+            <span class="dl-icon">📄</span>
+            <span class="dl-label">VTT File</span>
+            <span class="dl-sub">Web captions</span>
+          </button>
+          <button class="dl-btn-card" id="dlBtnVideoSRT" onclick="dlVideoAndSRT()" disabled>
+            <span class="dl-icon">📦</span>
+            <span class="dl-label">Video + SRT</span>
+            <span class="dl-sub">Toggle in VLC</span>
+          </button>
+          <button class="dl-btn-card dl-btn-fire" id="dlBtnBurnIn" onclick="startBurnIn()" disabled>
+            <span class="dl-icon">🔥</span>
+            <span class="dl-label">Burn Into Video</span>
+            <span class="dl-sub">Permanently embed</span>
+          </button>
+        </div>
+        <div id="dlHint" style="margin-top:10px;padding:9px 10px;background:var(--ink3);border-radius:8px;font-size:0.7rem;color:var(--text3);line-height:1.6;display:none">
+          <strong style="color:var(--text2)">SRT/VTT</strong> — Toggle on/off in VLC, YouTube, any player<br>
+          <strong style="color:var(--text2)">Video+SRT</strong> — Keep both files in same folder; VLC auto-loads<br>
+          <strong style="color:var(--text2)">Burn-In</strong> — Subs baked into pixels; visible everywhere
+        </div>
+      </div>
+    </div>
 
     <!-- SETTINGS -->
     <div class="panel">
@@ -1103,7 +1141,7 @@ async function generateSubtitles() {
     setTimeout(() => setGenProg(false), 900);
 
     renderList();
-    document.getElementById('dlSection').style.display = '';
+    enableDownloads();
     document.getElementById('clearBtn').style.display = '';
     document.getElementById('addRow').style.display = '';
     toast(`✅ ${subtitles.length} subtitles generated!`, 'ok');
@@ -1361,7 +1399,7 @@ function addSubManual() {
 function clearSubs() {
   if (!confirm('Clear all subtitles?')) return;
   subtitles = []; renderList();
-  document.getElementById('dlSection').style.display = 'none';
+  disableDownloads();
   document.getElementById('clearBtn').style.display = 'none';
   document.getElementById('subText').textContent = '';
 }
@@ -1422,7 +1460,38 @@ async function translateSubs() {
   btn.disabled = false; btn.innerHTML = '🌐 Translate';
 }
 
-// ─── DOWNLOAD ───
+// ─── DOWNLOAD STATE ───
+function enableDownloads() {
+  ['dlBtnSRT','dlBtnVTT','dlBtnVideoSRT','dlBtnBurnIn'].forEach(id => {
+    const b = document.getElementById(id);
+    if (b) b.disabled = false;
+  });
+  const badge = document.getElementById('dlBadge');
+  if (badge) {
+    badge.textContent = subtitles.length + ' subtitles ready';
+    badge.style.background = 'rgba(0,212,170,0.1)';
+    badge.style.color = 'var(--teal)';
+    badge.style.borderColor = 'rgba(0,212,170,0.25)';
+  }
+  const hint = document.getElementById('dlHint');
+  if (hint) hint.style.display = '';
+}
+
+function disableDownloads() {
+  ['dlBtnSRT','dlBtnVTT','dlBtnVideoSRT','dlBtnBurnIn'].forEach(id => {
+    const b = document.getElementById(id);
+    if (b) b.disabled = true;
+  });
+  const badge = document.getElementById('dlBadge');
+  if (badge) {
+    badge.textContent = 'Generate first';
+    badge.style.background = 'rgba(255,255,255,0.05)';
+    badge.style.color = 'var(--text3)';
+    badge.style.borderColor = 'var(--border)';
+  }
+  const hint = document.getElementById('dlHint');
+  if (hint) hint.style.display = 'none';
+}
 function getBaseName() { return (videoFile?.name || 'video').replace(/\.[^.]+$/, ''); }
 
 function buildSRT() {
