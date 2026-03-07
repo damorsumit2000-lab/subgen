@@ -1572,19 +1572,20 @@ async function muxSubsIntoVideo() {
       }
     });
 
-    // Mux: copy all streams untouched, add SRT as subtitle track
-    // -c copy = zero re-encoding = original quality, original speed, full audio
-    // -disposition:s:0 default = subtitle track ON by default when file opens
+    // Mux SRT as proper subtitle track into MKV
     const outName = 'output.mkv';
     await ffmpeg.run(
       '-i', inputName,
       '-i', 'subs.srt',
-      '-c', 'copy',
-      '-c:s', 'srt',
-      '-map', '0',
-      '-map', '1',
-      '-disposition:s:0', 'default',   // subtitle ON by default
-      '-metadata:s:s:0', 'title=Subtitles',
+      '-map', '0:v:0',          // video stream
+      '-map', '0:a:0',          // audio stream
+      '-map', '1:0',            // subtitle stream
+      '-c:v', 'copy',           // copy video — no re-encode
+      '-c:a', 'copy',           // copy audio — no re-encode
+      '-c:s', 'srt',            // subtitle as SRT
+      '-metadata:s:s:0', 'language=und',
+      '-metadata:s:s:0', 'handler_name=Subtitles',
+      '-disposition:s:0', 'default+forced',
       '-y',
       outName
     );
