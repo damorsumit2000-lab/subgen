@@ -1246,12 +1246,12 @@ Respond with ONLY numbered lines in exactly this format:
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: 'llama3-70b-8192',
+          model: 'llama-3.3-70b-versatile',
           messages: [
             { role: 'system', content: systemPrompt },
             { role: 'user', content: input }
           ],
-          temperature: 0.1, max_tokens: 2000
+          temperature: 0.1, max_tokens: 2048
         })
       });
 
@@ -1429,23 +1429,33 @@ async function translateSubs() {
       setTransProg(true, `${i+1}–${Math.min(i+BATCH,result.length)} of ${result.length}…`, pct);
 
       const texts = chunk.map((s,j) => `${j+1}. ${s.text}`).join('\n');
-      const prompt = `Translate these subtitles to ${langName}. Return ONLY numbered lines. No explanations.\n\n${texts}`;
+      const prompt = `Translate these subtitles to ${langName}. Return ONLY numbered lines in this exact format:\n1. translated text\n2. translated text\nNo explanations, no extra text.\n\n${texts}`;
 
       const res = await fetch('/proxy/chat/completions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: 'llama3-70b-8192',
+          model: 'llama-3.3-70b-versatile',
           messages: [{ role: 'user', content: prompt }],
-          temperature: 0.1, max_tokens: 2000
+          temperature: 0.1,
+          max_tokens: 2048
         })
       });
-      if (!res.ok) throw new Error('Translation error ' + res.status);
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData?.error?.message || 'API error ' + res.status);
+      }
+
       const data = await res.json();
-      const lines = data.choices[0].message.content.split('\n').filter(l => l.trim());
-      lines.forEach((line, j) => {
-        const m = line.match(/^\d+\.\s+(.+)$/);
-        if (m && chunk[j]) chunk[j].text = m[1].trim();
+      const content = data.choices?.[0]?.message?.content || '';
+      const lines = content.split('\n').filter(l => l.trim());
+      lines.forEach((line) => {
+        const m = line.match(/^(\d+)\.\s+(.+)$/);
+        if (m) {
+          const idx = parseInt(m[1]) - 1;
+          if (chunk[idx]) chunk[idx].text = m[2].trim();
+        }
       });
       chunk.forEach((s, j) => { result[i+j].text = s.text; });
     }
@@ -1457,6 +1467,7 @@ async function translateSubs() {
   } catch(e) {
     setTransProg(false);
     toast('Translation error: ' + e.message, 'err');
+    console.error('Translation error:', e);
   }
   btn.disabled = false; btn.innerHTML = '🌐 Translate';
 }
