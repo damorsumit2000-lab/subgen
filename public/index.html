@@ -827,7 +827,7 @@ header{
   <div class="modal-box">
     <div class="modal-spinner"></div>
     <h3>Burning Subtitles</h3>
-    <p>Capturing every frame and burning subtitles in. Progress shown below — download starts automatically when done.</p>
+    <p>Rendering in real-time with audio preserved. Download starts automatically when done.</p>
     <div class="modal-prog-bg"><div class="modal-prog-fill" id="burnFill"></div></div>
     <div class="modal-label" id="burnLabel">Preparing…</div>
     <button class="btn btn-ghost" style="margin-top:14px;width:100%" onclick="cancelBurn()">Cancel</button>
@@ -1542,7 +1542,7 @@ async function renderBurnIn() {
 
     const rv = document.createElement('video');
     rv.src = URL.createObjectURL(videoFile);
-    rv.muted = true;
+    rv.muted = false;
     rv.playsInline = true;
     rv.preload = 'auto';
 
@@ -1555,14 +1555,34 @@ async function renderBurnIn() {
     const W = rv.videoWidth || 1280;
     const H = rv.videoHeight || 720;
     const dur = rv.duration;
-
     if (!dur || !isFinite(dur)) throw new Error('Cannot read video duration.');
 
-    setBurnProg(8, 'Preparing canvas…');
-
+    // ── CANVAS for video frames ──
     const canvas = document.createElement('canvas');
     canvas.width = W; canvas.height = H;
     const ctx = canvas.getContext('2d');
+
+    // ── AUDIO: capture from video element directly ──
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    const audioCtx = new AudioCtx();
+    const audioSrc = audioCtx.createMediaElementSource(rv);
+    const audioDest = audioCtx.createMediaStreamDestination();
+    audioSrc.connect(audioDest);
+    audioSrc.connect(audioCtx.destination); // also play audibly during render
+
+    // ── COMBINED STREAM: canvas video + real audio ──
+    const canvasStream = canvas.captureStream(30);
+    const combined = new MediaStream([
+      ...canvasStream.getVideoTracks(),
+      ...audioDest.stream.getAudioTracks()
+    ]);
+
+    const mime = ['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm']
+      .find(m => MediaRecorder.isTypeSupported(m)) || 'video/webm';
+
+    const chunks = [];
+    const rec = new MediaRecorder(combined, { mimeType: mime, videoBitsPerSecond: 8_000_000 });
+    rec.ondataavailable = e => { if (e.data && e.data.size > 0) chunks.push(e.data); };
 
     // Style snapshot
     const size  = parseInt(document.getElementById('sSize').value);
@@ -1586,108 +1606,80 @@ async function renderBurnIn() {
       const th = lines.length * lh;
       const px = fs * 0.8, py = fs * 0.4;
       const mw = Math.max(...lines.map(l => ctx.measureText(l).width));
-      const by = pos === 'top' ? H * 0.04 : pos === 'middle' ? H * 0.5 - th / 2 : H * 0.90 - th;
-      const bx = (W - mw - px * 2) / 2;
+      const by = pos === 'top' ? H*0.04 : pos==='middle' ? H*0.5-th/2 : H*0.90-th;
+      const bx = (W - mw - px*2) / 2;
       ctx.fillStyle = `rgba(${r2},${g2},${b2},${alpha})`;
       ctx.beginPath();
-      if (ctx.roundRect) ctx.roundRect(bx, by - py, mw + px*2, th + py*2, 8);
-      else ctx.rect(bx, by - py, mw + px*2, th + py*2);
+      if (ctx.roundRect) ctx.roundRect(bx, by-py, mw+px*2, th+py*2, 8);
+      else ctx.rect(bx, by-py, mw+px*2, th+py*2);
       ctx.fill();
       ctx.fillStyle = col;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'top';
-      lines.forEach((ln, i) => ctx.fillText(ln, W / 2, by + i * lh));
+      ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+      lines.forEach((ln, i) => ctx.fillText(ln, W/2, by + i*lh));
     }
 
-    // ── FRAME-BY-FRAME SEEK APPROACH ──
-    // Instead of playing video in real-time (unreliable), we seek frame by frame.
-    // This is 100% guaranteed to complete regardless of browser/device.
-    const FPS = 24;
-    const FRAME_DUR = 1 / FPS;
-    const totalFrames = Math.ceil(dur * FPS);
-    const frameBlobs = [];
-
-    setBurnProg(10, `Capturing ${totalFrames} frames…`);
-
-    for (let f = 0; f < totalFrames; f++) {
-      if (burnCancelled) throw new Error('Cancelled');
-
-      const t = f * FRAME_DUR;
-
-      // Seek to exact time
-      rv.currentTime = t;
-      await new Promise(res => { rv.onseeked = res; });
-
-      // Draw video frame + subtitle
-      ctx.drawImage(rv, 0, 0, W, H);
-      drawSubtitle(t);
-
-      // Capture this frame as blob
-      const frameBlob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.92));
-      frameBlobs.push(frameBlob);
-
-      const pct = Math.round(10 + (f / totalFrames) * 75);
-      if (f % 10 === 0) setBurnProg(pct, `Frame ${f + 1} / ${totalFrames} — ${ft(t)}`);
-    }
-
-    if (burnCancelled) throw new Error('Cancelled');
-
-    setBurnProg(86, 'Encoding video…');
-
-    // ── ENCODE FRAMES INTO WEBM USING CANVAS STREAM + MEDIARECORDER ──
-    // But now we PUSH frames manually at controlled pace — no playback race condition
-    const encCanvas = document.createElement('canvas');
-    encCanvas.width = W; encCanvas.height = H;
-    const encCtx = encCanvas.getContext('2d');
-
-    const mime = ['video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm']
-      .find(m => MediaRecorder.isTypeSupported(m)) || 'video/webm';
-
-    const encStream = encCanvas.captureStream(FPS);
-    const encChunks = [];
-    const encRec = new MediaRecorder(encStream, { mimeType: mime, videoBitsPerSecond: 5_000_000 });
-    encRec.ondataavailable = e => { if (e.data && e.data.size > 0) encChunks.push(e.data); };
-
-    await new Promise((resolve, reject) => {
-      encRec.onstop = () => {
+    // ── Wire onstop BEFORE start ──
+    let recStopped = false;
+    const finishPromise = new Promise((resolve, reject) => {
+      rec.onstop = () => {
         if (burnCancelled) { reject(new Error('Cancelled')); return; }
-        const blob = new Blob(encChunks, { type: mime });
+        setBurnProg(100, 'Saving…');
+        const blob = new Blob(chunks, { type: mime });
         dlBlob(blob, getBaseName() + '_subtitled.webm');
+        audioCtx.close();
         URL.revokeObjectURL(rv.src);
         resolve();
       };
-
-      encRec.start();
-
-      // Push each frame image onto the encoding canvas at FPS rate
-      let fi = 0;
-      const MS_PER_FRAME = Math.round(1000 / FPS);
-
-      const pushFrame = () => {
-        if (fi >= frameBlobs.length) {
-          setTimeout(() => encRec.stop(), 200);
-          return;
-        }
-        if (burnCancelled) { encRec.stop(); return; }
-
-        const url = URL.createObjectURL(frameBlobs[fi]);
-        const img = new Image();
-        img.onload = () => {
-          encCtx.drawImage(img, 0, 0, W, H);
-          URL.revokeObjectURL(url);
-          const pct = Math.round(86 + (fi / frameBlobs.length) * 13);
-          if (fi % 10 === 0) setBurnProg(pct, `Encoding frame ${fi + 1} / ${frameBlobs.length}`);
-          fi++;
-          setTimeout(pushFrame, MS_PER_FRAME);
-        };
-        img.onerror = () => { fi++; setTimeout(pushFrame, MS_PER_FRAME); };
-        img.src = url;
-      };
-
-      pushFrame();
     });
 
-    setBurnProg(100, 'Done!');
+    // ── Start recording ──
+    rec.start(100); // collect data every 100ms
+
+    // Seek to start, then play
+    rv.currentTime = 0;
+    await new Promise(r => { rv.onseeked = r; });
+    await rv.play();
+
+    // ── RAF draw loop ──
+    let rafActive = true;
+    const drawLoop = () => {
+      if (!rafActive) return;
+      ctx.drawImage(rv, 0, 0, W, H);
+      drawSubtitle(rv.currentTime);
+      const pct = Math.min(97, Math.round((rv.currentTime / dur) * 94) + 3);
+      setBurnProg(pct, `Rendering ${ft(rv.currentTime)} / ${ft(dur)}`);
+      requestAnimationFrame(drawLoop);
+    };
+    requestAnimationFrame(drawLoop);
+
+    // ── Stop when video ends ──
+    const stopAll = () => {
+      if (recStopped) return;
+      recStopped = true;
+      rafActive = false;
+      rv.pause();
+      // Flush final frame
+      ctx.drawImage(rv, 0, 0, W, H);
+      drawSubtitle(rv.currentTime);
+      setTimeout(() => {
+        if (rec.state !== 'inactive') rec.stop();
+      }, 250);
+    };
+
+    rv.onended = stopAll;
+
+    // Safety net: if onended never fires, stop after duration + 4s
+    const safety = setTimeout(stopAll, (dur + 4) * 1000);
+
+    // Also stop on cancel
+    const cancelCheck = setInterval(() => {
+      if (burnCancelled) { clearInterval(cancelCheck); clearTimeout(safety); stopAll(); }
+    }, 500);
+
+    await finishPromise;
+    clearInterval(cancelCheck);
+    clearTimeout(safety);
+
     document.getElementById('burnModal').classList.remove('show');
     toast('✅ Burn-in complete! Video downloaded.', 'ok');
 
