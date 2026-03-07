@@ -200,10 +200,13 @@
     padding: 6px 16px;
     border-radius: 6px;
     letter-spacing: 0.2px;
-    line-height: 1.5;
+    line-height: 1.6;
     max-width: 100%;
     backdrop-filter: blur(4px);
     text-shadow: 0 1px 4px rgba(0,0,0,0.6);
+    white-space: normal;
+    word-break: break-word;
+    text-align: center;
   }
   #subtitleText:empty { display: none; }
 
@@ -787,8 +790,19 @@ function init() {
     if (e.target.files[0]) handleFile(e.target.files[0]);
   });
 
-  // Video timeupdate for subtitles
-  document.getElementById('mainVideo').addEventListener('timeupdate', onTimeUpdate);
+  // Video timeupdate for subtitles — use rAF for smoother sync
+  const videoEl = document.getElementById('mainVideo');
+  videoEl.addEventListener('timeupdate', onTimeUpdate);
+
+  // Also poll with rAF when playing for tighter sync
+  let rafId = null;
+  function rafPoll() {
+    onTimeUpdate();
+    rafId = requestAnimationFrame(rafPoll);
+  }
+  videoEl.addEventListener('play', () => { if (!rafId) rafId = requestAnimationFrame(rafPoll); });
+  videoEl.addEventListener('pause', () => { if (rafId) { cancelAnimationFrame(rafId); rafId = null; } });
+  videoEl.addEventListener('ended', () => { if (rafId) { cancelAnimationFrame(rafId); rafId = null; } });
 }
 
 // ─────────────────────────────────────────
@@ -864,12 +878,46 @@ function updateSubStyle() {
 // ─────────────────────────────────────────
 function onTimeUpdate() {
   const t = document.getElementById('mainVideo').currentTime;
-  const active = subtitles.find(s => t >= s.start && t <= s.end);
-  document.getElementById('subtitleText').textContent = active ? active.text : '';
+
+  // Look ahead slightly (+0.1s) to compensate for display lag
+  const active = subtitles.find(s => t >= (s.start - 0.1) && t <= (s.end + 0.15));
+  const text = active ? active.text : '';
+
+  const el = document.getElementById('subtitleText');
+  if (el.dataset.current !== text) {
+    el.dataset.current = text;
+    // Split long text into max 2 lines of ~42 chars each
+    el.innerHTML = formatSubtitleLines(text);
+  }
+
   // Highlight active in list
   document.querySelectorAll('.sub-item').forEach(el => {
     el.classList.toggle('active', el.dataset.id === String(active?.id));
   });
+
+  // Auto scroll active subtitle into view in editor
+  const activeEl = document.querySelector(`.sub-item[data-id="${active?.id}"]`);
+  if (activeEl) activeEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+function formatSubtitleLines(text) {
+  if (!text) return '';
+  const MAX = 42;
+  if (text.length <= MAX) return escapeHtml(text);
+
+  // Try to split at a space near the middle
+  const mid = Math.floor(text.length / 2);
+  let splitAt = text.lastIndexOf(' ', mid);
+  if (splitAt < 10) splitAt = text.indexOf(' ', mid);
+  if (splitAt === -1) return escapeHtml(text);
+
+  const line1 = text.slice(0, splitAt).trim();
+  const line2 = text.slice(splitAt).trim();
+  return escapeHtml(line1) + '<br>' + escapeHtml(line2);
+}
+
+function escapeHtml(t) {
+  return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
 // ─────────────────────────────────────────
@@ -897,7 +945,7 @@ async function generateSubtitles() {
     const fileExt = supportedExts.includes(ext) ? ext : 'mp4';
 
     formData.append('file', videoFile, `audio.${fileExt}`);
-    formData.append('model', 'whisper-large-v3');
+    formData.append('model', 'whisper-large-v3-turbo');
     formData.append('response_format', 'verbose_json');
     // Use BOTH word and segment timestamps for maximum precision
     formData.append('timestamp_granularities[]', 'word');
@@ -960,34 +1008,66 @@ async function generateSubtitles() {
 
 // Group words into readable subtitle chunks
 function buildSubtitlesFromWords(words) {
-  const MAX_WORDS = 7;
-  const MAX_DURATION = 3.5; // seconds
+  const MAX_WORDS = 5;       // shorter = better sync
+  const MAX_DURATION = 2.5;  // max seconds per subtitle
+  const MIN_GAP = 0.4;       // natural pause = new subtitle
+
   const subtitleChunks = [];
   let chunk = [];
   let chunkStart = null;
+  let lastWordEnd = null;
 
   words.forEach((w, i) => {
-    const word = w.word?.trim() || w.text?.trim() || '';
+    const word = (w.word ?? w.text ?? '').trim();
     if (!word) return;
 
-    if (chunkStart === null) chunkStart = w.start;
-    chunk.push(word);
+    const wStart = typeof w.start === 'number' ? w.start : parseFloat(w.start);
+    const wEnd   = typeof w.end   === 'number' ? w.end   : parseFloat(w.end);
 
-    const duration = w.end - chunkStart;
+    // Detect natural pause → force new subtitle
+    const pauseBreak = lastWordEnd !== null && (wStart - lastWordEnd) > MIN_GAP;
+
+    if (chunkStart === null) chunkStart = wStart;
+
+    const duration = wEnd - chunkStart;
     const isLast = i === words.length - 1;
-    const shouldBreak = chunk.length >= MAX_WORDS || duration >= MAX_DURATION || isLast;
+
+    const shouldBreak = chunk.length >= MAX_WORDS
+      || duration >= MAX_DURATION
+      || (pauseBreak && chunk.length > 0);
 
     if (shouldBreak && chunk.length > 0) {
+      // Close current chunk BEFORE this word
       subtitleChunks.push({
         id: subtitleChunks.length,
         start: parseFloat(chunkStart.toFixed(3)),
-        end: parseFloat(w.end.toFixed(3)),
+        end: parseFloat((lastWordEnd ?? wStart).toFixed(3)),
         text: chunk.join(' ')
       });
       chunk = [];
-      chunkStart = null;
+      chunkStart = wStart;
+    }
+
+    chunk.push(word);
+    lastWordEnd = wEnd;
+
+    // Close last chunk
+    if (isLast && chunk.length > 0) {
+      subtitleChunks.push({
+        id: subtitleChunks.length,
+        start: parseFloat(chunkStart.toFixed(3)),
+        end: parseFloat(wEnd.toFixed(3)),
+        text: chunk.join(' ')
+      });
     }
   });
+
+  // Fix: ensure no subtitle end overlaps next subtitle start
+  for (let i = 0; i < subtitleChunks.length - 1; i++) {
+    if (subtitleChunks[i].end > subtitleChunks[i+1].start) {
+      subtitleChunks[i].end = parseFloat((subtitleChunks[i+1].start - 0.05).toFixed(3));
+    }
+  }
 
   return subtitleChunks;
 }
