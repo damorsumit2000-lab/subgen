@@ -899,7 +899,7 @@ async function generateSubtitles() {
 
     showProgress(true, 'Transcribing with Whisper AI…', 55);
 
-    const res = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+    const res = await fetch('https://subgen.damorsumit2000.workers.dev/openai/v1/audio/transcriptions', {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + apiKey },
       body: formData
@@ -1097,7 +1097,7 @@ async function translateSubtitles() {
       const texts = chunk.map((s, idx) => `${idx+1}. ${s.text}`).join('\n');
       const prompt = `Translate the following numbered subtitles to ${langName}. Return ONLY the translated lines in the same numbered format. Do not add explanations.\n\n${texts}`;
 
-      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      const res = await fetch('https://subgen.damorsumit2000.workers.dev/openai/v1/chat/completions', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
         body: JSON.stringify({
