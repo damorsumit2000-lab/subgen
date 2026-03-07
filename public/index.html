@@ -1288,28 +1288,51 @@ async function downloadVideoWithSubs() {
 function cancelRender() { renderCancelled = true; document.getElementById('renderModal').classList.remove('active'); }
 
 async function renderVideoWithSubtitles() {
-  const videoEl = document.getElementById('mainVideo');
+  // Create a FRESH video element for rendering — avoids AudioContext conflict
+  // with the main player which may already have a MediaElementSourceNode
+  const renderVideo = document.createElement('video');
+  renderVideo.src = URL.createObjectURL(videoFile);
+  renderVideo.crossOrigin = 'anonymous';
+  renderVideo.muted = false;
+  renderVideo.volume = 1;
+
+  // Wait for metadata
+  await new Promise((res, rej) => {
+    renderVideo.onloadedmetadata = res;
+    renderVideo.onerror = rej;
+    renderVideo.load();
+  });
+
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
+  canvas.width = renderVideo.videoWidth || 1280;
+  canvas.height = renderVideo.videoHeight || 720;
 
-  canvas.width = videoEl.videoWidth || 1280;
-  canvas.height = videoEl.videoHeight || 720;
+  // Capture video stream from canvas
+  const canvasStream = canvas.captureStream(30);
 
-  const stream = canvas.captureStream(30);
+  // Capture audio directly from the fresh video element
+  const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  const audioDest = audioCtx.createMediaStreamDestination();
+  const src = audioCtx.createMediaElementSource(renderVideo);
+  src.connect(audioDest);
+  src.connect(audioCtx.destination);
+
+  // Combine canvas video + audio into one stream
+  const combinedStream = new MediaStream([
+    ...canvasStream.getVideoTracks(),
+    ...audioDest.stream.getAudioTracks()
+  ]);
+
   const chunks = [];
   const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')
     ? 'video/webm;codecs=vp9,opus'
+    : MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')
+    ? 'video/webm;codecs=vp8,opus'
     : 'video/webm';
 
-  const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 4_000_000 });
+  const recorder = new MediaRecorder(combinedStream, { mimeType, videoBitsPerSecond: 5_000_000 });
   recorder.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
-
-  // Add audio from video
-  const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  const audioDest = audioCtx.createMediaStreamDestination();
-  const src = audioCtx.createMediaElementSource(videoEl);
-  src.connect(audioDest); src.connect(audioCtx.destination);
-  audioDest.stream.getAudioTracks().forEach(t => stream.addTrack(t));
 
   // Subtitle style
   const size = document.getElementById('subSize').value;
@@ -1320,33 +1343,37 @@ async function renderVideoWithSubtitles() {
   const posVal = document.getElementById('subPos').value;
 
   function getSubtitleAtTime(t) {
-    return subtitles.find(s => t >= s.start && t <= s.end);
+    return subtitles.find(s => t >= (s.start - 0.05) && t <= (s.end + 0.05));
   }
 
-  const duration = videoEl.duration;
-  let lastT = -1;
+  const duration = renderVideo.duration;
 
   recorder.start(100);
-  videoEl.currentTime = 0;
-  await new Promise(r => setTimeout(r, 200));
-  videoEl.muted = false;
-  videoEl.play();
+  renderVideo.currentTime = 0;
+  await new Promise(r => setTimeout(r, 150));
+  renderVideo.play();
 
   await new Promise((resolve, reject) => {
     const draw = () => {
-      if (renderCancelled) { videoEl.pause(); recorder.stop(); reject(new Error('Cancelled')); return; }
-      ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
-      const t = videoEl.currentTime;
+      if (renderCancelled) {
+        renderVideo.pause();
+        recorder.stop();
+        reject(new Error('Cancelled'));
+        return;
+      }
 
-      // Draw subtitle
+      ctx.drawImage(renderVideo, 0, 0, canvas.width, canvas.height);
+      const t = renderVideo.currentTime;
+
+      // Draw subtitle on canvas
       const sub = getSubtitleAtTime(t);
       if (sub) {
         const fs = parseInt(size) * (canvas.width / 960);
         ctx.font = `500 ${fs}px "${font}"`;
         const lines = wrapText(ctx, sub.text, canvas.width * 0.85);
-        const lineH = fs * 1.4;
+        const lineH = fs * 1.5;
         const totalH = lines.length * lineH;
-        const padX = fs * 0.8, padY = fs * 0.4;
+        const padX = fs * 0.8, padY = fs * 0.5;
         const maxW = Math.max(...lines.map(l => ctx.measureText(l).width));
 
         let boxY;
@@ -1364,22 +1391,21 @@ async function renderVideoWithSubtitles() {
         ctx.fill();
 
         ctx.fillStyle = color;
-        ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
         lines.forEach((line, i) => ctx.fillText(line, canvas.width/2, boxY + i * lineH));
       }
 
-      // Progress
       const pct = Math.min(99, Math.round((t / duration) * 95) + 5);
       setRenderProgress(pct, `Rendering ${fmtTimeSRT(t)} / ${fmtTimeSRT(duration)}`);
 
-      if (!videoEl.ended && !videoEl.paused && !renderCancelled) {
+      if (!renderVideo.ended && !renderVideo.paused && !renderCancelled) {
         requestAnimationFrame(draw);
-      } else if (videoEl.ended) {
-        setTimeout(() => { recorder.stop(); }, 300);
+      } else if (renderVideo.ended) {
+        setTimeout(() => recorder.stop(), 400);
       }
     };
 
-    videoEl.onended = () => {};
     requestAnimationFrame(draw);
 
     recorder.onstop = () => {
@@ -1388,6 +1414,7 @@ async function renderVideoWithSubtitles() {
       const name = (videoFile?.name || 'video').replace(/\.[^.]+$/, '') + '_subtitled.webm';
       downloadBlob(blob, name);
       audioCtx.close();
+      URL.revokeObjectURL(renderVideo.src);
       resolve();
     };
   });
