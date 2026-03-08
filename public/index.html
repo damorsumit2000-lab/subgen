@@ -802,22 +802,30 @@ body::after{
 
 <!-- URL FALLBACK MODAL -->
 <div class="modal-bg" id="urlFallbackModal">
-  <div class="modal-box" style="max-width:400px">
+  <div class="modal-box" style="max-width:420px">
     <div style="padding:24px">
-      <div style="font-family:var(--sans);font-size:1rem;font-weight:700;margin-bottom:6px;color:var(--txt)">
-        ⚠ Cannot auto-fetch <span id="urlFallbackPlatform"></span>
+      <div style="font-family:var(--sans);font-size:1rem;font-weight:700;margin-bottom:8px;color:var(--txt)">
+        ⚠ No captions found — <span id="urlFallbackPlatform"></span>
       </div>
-      <p style="font-size:.7rem;color:var(--txt2);font-family:var(--mono);line-height:1.7;margin-bottom:16px">
-        Due to platform restrictions, we can't directly access this video in the browser.<br><br>
-        <strong style="color:var(--neon)">Best option:</strong> Download the video using a tool like
-        <code style="color:var(--amber)">yt-dlp</code> or your browser's video downloader,
-        then upload the file above for precise Whisper transcription.<br><br>
+      <p id="urlFallbackMsg" style="font-size:.68rem;color:var(--red);font-family:var(--mono);line-height:1.6;margin-bottom:12px;padding:8px;background:var(--red2);border:1px solid rgba(255,59,92,.2)"></p>
+      <p style="font-size:.7rem;color:var(--txt2);font-family:var(--mono);line-height:1.8;margin-bottom:16px">
+        <strong style="color:var(--neon)">// Solution:</strong> Download the video audio and upload it here.<br>
+        Whisper will transcribe the actual speech with full accuracy.<br><br>
+        <strong style="color:var(--amber)">How to download:</strong><br>
+        1. Install <code style="color:var(--amber)">yt-dlp</code> (free, open source)<br>
+        2. Run: <code style="background:var(--raised);padding:2px 6px;display:block;margin:4px 0;color:var(--neon)">yt-dlp -x --audio-format mp3 &lt;URL&gt;</code>
+        3. Upload the .mp3 file above → Whisper transcribes it perfectly<br><br>
         <a id="urlFallbackLink" href="#" target="_blank" rel="noopener"
-           style="color:var(--amber);text-decoration:underline;word-break:break-all;font-size:.65rem"></a>
+           style="color:var(--txt3);text-decoration:underline;word-break:break-all;font-size:.62rem"></a>
       </p>
-      <button class="btn btn-neon" style="width:100%;justify-content:center" onclick="document.getElementById('urlFallbackModal').classList.remove('show')">
-        [ CLOSE ]
-      </button>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost" style="flex:1;justify-content:center;font-size:.65rem"
+          onclick="document.getElementById('urlFallbackModal').classList.remove('show')">[ CLOSE ]</button>
+        <a href="https://github.com/yt-dlp/yt-dlp" target="_blank" rel="noopener"
+          class="btn btn-amber" style="flex:1;justify-content:center;font-size:.65rem;text-decoration:none">
+          yt-dlp ↗
+        </a>
+      </div>
     </div>
   </div>
 </div>
@@ -1615,72 +1623,85 @@ function showUrlFallback(url,platform){
 }
 
 async function generateSubsFromYouTubeUrl(url){
-  // Extract YouTube video ID
   const ytId=url.match(/(?:v=|youtu\.be\/|embed\/)([\w-]{11})/)?.[1];
   if(!ytId){
     document.getElementById('urlProgress').style.display='none';
     toast('Could not parse YouTube video ID.','err');return;
   }
 
-  setUrlStep(1,'Fetching transcript from YouTube…');
+  document.getElementById('urlProgress').style.display='';
+  setUrlStep(0,'Connecting to YouTube…');
 
   try{
-    // Use Groq LLM to generate placeholder subtitles with a note
-    // In production, you'd call a transcript API. Here we call Groq to generate
-    // subtitles based on what it knows about the video (if it's a known video)
-    // and clearly label them as AI-estimated.
-    setUrlStep(2,'Analyzing with AI…');
+    setUrlStep(1,'Fetching real captions from YouTube…');
 
-    const prompt=`You are a subtitle generator. For the YouTube video with ID "${ytId}" (URL: ${url}), 
-generate realistic subtitle entries. If you know this video, generate accurate subtitles. 
-If not, generate placeholder subtitles that demonstrate the format.
+    // Call our worker proxy which scrapes YouTube's caption track
+    const lang = document.getElementById('vidLang').value || 'en';
+    const res = await fetch('/proxy/yt-transcript?id='+encodeURIComponent(ytId)+'&lang='+encodeURIComponent(lang));
+    const data = await res.json();
 
-Return ONLY a JSON array, no markdown, no explanation:
-[{"start":0.0,"end":3.5,"text":"Subtitle text here"},{"start":3.8,"end":7.2,"text":"Next subtitle"}]
+    // No captions available on YouTube for this video
+    if(res.status===404 && data.error==='no_captions'){
+      document.getElementById('urlProgress').style.display='none';
+      toast('No captions on YouTube for this video.','err');
+      showNoCaptionsModal(ytId, data.message);
+      return;
+    }
 
-Generate at least 10-15 subtitle entries covering 0-60 seconds.
-Make them realistic conversational sentences. Each subtitle should be 3-8 words.`;
+    if(!res.ok || data.error){
+      throw new Error(data.error || 'Failed to fetch transcript');
+    }
 
-    const res=await fetch('/proxy/chat/completions',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({
-        model:'llama-3.3-70b-versatile',
-        messages:[{role:'user',content:prompt}],
-        temperature:0.3,max_tokens:2048
-      })
-    });
-    if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(e?.error?.message||'API error')}
-    const data=await res.json();
-    const raw=(data.choices?.[0]?.message?.content||'').trim();
+    setUrlStep(2,'Parsing '+data.totalTracks+' caption tracks…');
 
-    setUrlStep(3,'Parsing subtitles…');
-    let parsed;
-    try{
-      const clean=raw.replace(/```json|```/g,'').trim();
-      parsed=JSON.parse(clean);
-    }catch(e){throw new Error('AI response was not valid JSON')}
+    // Show available language tracks if multiple exist
+    if(data.availableLangs && data.availableLangs.length > 1){
+      toast('📋 '+data.availableLangs.length+' caption languages available. Loaded: '+data.trackName,'ok');
+    }
 
-    if(!Array.isArray(parsed)||!parsed.length)throw new Error('No subtitles returned');
+    setUrlStep(3,'Building subtitle timeline…');
 
-    subtitles=parsed.map((s,i)=>({id:i,start:+s.start.toFixed(3),end:+s.end.toFixed(3),text:s.text}));
-    renderList();enableDownloads();
+    // Convert transcript to subtitle objects
+    subtitles = data.transcript.map((item, i)=>({
+      id: i,
+      start: +parseFloat(item.start).toFixed(3),
+      end:   +(parseFloat(item.start)+parseFloat(item.dur||2)).toFixed(3),
+      text:  decodeHTMLEntities(item.text||'').trim()
+    })).filter(s=>s.text);
+
+    if(!subtitles.length) throw new Error('Transcript was empty after parsing');
+
+    renderList(); enableDownloads();
     document.getElementById('clearBtn').style.display='';
     document.getElementById('addRow').style.display='';
     document.getElementById('urlProgress').style.display='none';
-
-    // Show YouTube player in video area
     loadYouTubePlayer(ytId);
 
-    toast('✅ AI subtitles generated for YouTube video! Note: These are AI-estimated — upload audio for precision.','ok');
+    toast('✅ '+subtitles.length+' real captions loaded! ('+data.trackName+')','ok');
 
   }catch(e){
     document.getElementById('urlProgress').style.display='none';
-    console.error(e);
-    toast('Error: '+e.message,'err');
+    console.error('YT transcript error:',e);
+    showNoCaptionsModal(ytId, e.message);
   }
 }
 
+function decodeHTMLEntities(text){
+  const el=document.createElement('textarea');
+  el.innerHTML=text;
+  return el.value;
+}
+
+function showNoCaptionsModal(ytId, reason){
+  const modal=document.getElementById('urlFallbackModal');
+  document.getElementById('urlFallbackPlatform').textContent='YouTube';
+  const link=document.getElementById('urlFallbackLink');
+  const ytUrl='https://youtube.com/watch?v='+ytId;
+  link.href=ytUrl; link.textContent=ytUrl;
+  const msg=document.getElementById('urlFallbackMsg');
+  if(msg) msg.textContent=reason||'No captions available for this video.';
+  modal.classList.add('show');
+}
 function loadYouTubePlayer(ytId){
   const wrap=document.querySelector('.video-wrap');
   // Remove existing video
