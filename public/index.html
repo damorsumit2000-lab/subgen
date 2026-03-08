@@ -2161,7 +2161,7 @@ window.addEventListener('DOMContentLoaded',function(){
       ctx.beginPath();ctx.moveTo(s.x,s.y);ctx.lineTo(s.x,s.y+s.len);ctx.stroke();
     });
 
-    // Particles + connections = cpmmit 1
+    // Particles + connections ++ 4:13 PM - 8th march commit
     PTS.forEach(p=>{
       p.x+=p.vx;p.y+=p.vy;
       if(p.x<0||p.x>W)p.vx*=-1;if(p.y<0||p.y>H)p.vy*=-1;
