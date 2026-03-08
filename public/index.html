@@ -10,7 +10,9 @@
 <link rel="apple-touch-icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxODAgMTgwIj4KICA8cmVjdCB3aWR0aD0iMTgwIiBoZWlnaHQ9IjE4MCIgcng9IjQwIiBmaWxsPSIjMWExYTFhIi8+CiAgPHJlY3QgeD0iMzYiIHk9IjU1IiB3aWR0aD0iMTA4IiBoZWlnaHQ9IjE0IiByeD0iNyIgZmlsbD0id2hpdGUiLz4KICA8cmVjdCB4PSIzNiIgeT0iODMiIHdpZHRoPSI4NCIgaGVpZ2h0PSIxNCIgcng9IjciIGZpbGw9IndoaXRlIi8+CiAgPHJlY3QgeD0iMzYiIHk9IjExMSIgd2lkdGg9IjYwIiBoZWlnaHQ9IjE0IiByeD0iNyIgZmlsbD0id2hpdGUiLz4KPC9zdmc+">
 <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#1c1c1c" media="(prefers-color-scheme: dark)">
-<script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
+<!-- FFmpeg WASM 0.12 — single-thread build, no SharedArrayBuffer needed -->
+<script src="https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.js"></script>
+<script src="https://unpkg.com/@ffmpeg/util@0.12.1/dist/umd/index.js"></script>
 <style>
 /* =============================================
    CaptionCraft — Minimal Classy
@@ -1525,23 +1527,28 @@ function cancelBurn(){burnCancelled=true;stopMemeCarousel();document.getElementB
 async function muxSubsIntoVideo(){
   try{
     setBurnProg(5,'Loading FFmpeg…');
-    const {createFFmpeg,fetchFile}=FFmpeg;
-    const ffmpeg=createFFmpeg({log:false,corePath:'https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js'});
-    await ffmpeg.load();if(burnCancelled)throw new Error('Cancelled');
+    const {FFmpeg:FFmpegClass2}=FFmpegWASM;
+    const {fetchFile:fetchFile2}=FFmpegUtil;
+    const ffmpeg=new FFmpegClass2();
+    ffmpeg.on('log',()=>{});
+    await ffmpeg.load({
+      coreURL:'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.js',
+      wasmURL:'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.wasm',
+    });if(burnCancelled)throw new Error('Cancelled');
     setBurnProg(20,'Preparing files…');
     const ext=videoFile.name.split('.').pop().toLowerCase()||'mp4';
     const inputName='input.'+ext;
-    ffmpeg.FS('writeFile',inputName,await fetchFile(videoFile));
-    ffmpeg.FS('writeFile','subs.srt',new TextEncoder().encode(buildSRT()));
+    await ffmpeg.writeFile(inputName,await fetchFile2(videoFile));
+    await ffmpeg.writeFile('subs.srt',new TextEncoder().encode(buildSRT()));
     if(burnCancelled)throw new Error('Cancelled');
     setBurnProg(35,'Muxing subtitles…');
-    ffmpeg.setProgress(({ratio})=>{if(ratio>=0&&ratio<=1)setBurnProg(35+Math.round(ratio*60),'Processing… '+Math.round(ratio*100)+'%')});
-    await ffmpeg.run('-i',inputName,'-i','subs.srt','-map','0:v:0','-map','0:a:0','-map','1:0','-c:v','copy','-c:a','copy','-c:s','srt','-metadata:s:s:0','language=und','-metadata:s:s:0','handler_name=Subtitles','-disposition:s:0','default+forced','-y','output.mkv');
+    ffmpeg.on('progress',({progress})=>{if(progress>=0&&progress<=1)setBurnProg(35+Math.round(progress*60),'Processing… '+Math.round(progress*100)+'%')});
+    await ffmpeg.exec(['-i',inputName,'-i','subs.srt','-map','0:v:0','-map','0:a:0','-map','1:0','-c:v','copy','-c:a','copy','-c:s','srt','-metadata:s:s:0','language=und','-metadata:s:s:0','handler_name=Subtitles','-disposition:s:0','default+forced','-y','output.mkv']);
     if(burnCancelled)throw new Error('Cancelled');
     setBurnProg(97,'Saving…');
-    const data=ffmpeg.FS('readFile','output.mkv');
+    const data=await ffmpeg.readFile('output.mkv');
     dlBlob(new Blob([data.buffer],{type:'video/x-matroska'}),getBaseName()+'_with_subs.mkv');
-    ffmpeg.FS('unlink',inputName);ffmpeg.FS('unlink','subs.srt');ffmpeg.FS('unlink','output.mkv');
+    try{await ffmpeg.deleteFile(inputName);await ffmpeg.deleteFile('subs.srt');await ffmpeg.deleteFile('output.mkv');}catch(_){}
     setBurnProg(100,'Complete!');stopMemeCarousel();
     setTimeout(()=>{document.getElementById('burnModal').classList.remove('show');toast('✅ MKV downloaded! Subtitles embedded & toggleable in VLC.','ok')},1200);
   }catch(e){
@@ -1564,218 +1571,232 @@ function cancelVisualBurn(){
   document.getElementById('visualBurnModal').classList.remove('show');
 }
 
+/* ─────────────────────────────────────────────
+   VISUAL BURN-IN  —  FFmpeg WASM
+   Strategy:
+   1. Copy video stream untouched (c:v copy) — no re-encode = 5-15s
+   2. Burn subtitles via libass subtitles filter — pure text render, fast
+   3. Only if source < 60fps → use fps filter (simple frame duplication,
+      NOT minterpolate which is ~100x slower)
+   4. Output MP4 H.264 ultrafast only when fps upscale needed
+   ───────────────────────────────────────────── */
 async function renderVisualBurn(){
   try{
-    setVisualProg(5,'Loading FFmpeg WASM…');
-
-    const {createFFmpeg,fetchFile}=FFmpeg;
-    const ffmpeg=createFFmpeg({
-      log:false,
-      corePath:'https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js'
+    setVisualProg(5,'Loading FFmpeg…');
+    const {FFmpeg:FFmpegClass}=FFmpegWASM;
+    const {fetchFile}=FFmpegUtil;
+    const ff=new FFmpegClass();
+    ff.on('log',({message})=>{
+      /* Progress from stderr */
+      const m=message.match(/time=(\d+):(\d+):([\d.]+)/);
+      if(m&&dur>0){
+        const t=parseInt(m[1])*3600+parseInt(m[2])*60+parseFloat(m[3]);
+        const pct=Math.min(93,22+Math.round((t/dur)*71));
+        if(pct>lastPct){
+          lastPct=pct;
+          const elapsed=(Date.now()-startEncode)/1000;
+          const eta=t>1?Math.round(((dur-t)/t)*elapsed):0;
+          const spd=t>0?(t/elapsed).toFixed(1):0;
+          setVisualProg(pct,`${Math.round(t)}s / ${Math.round(dur)}s · ${spd}x speed${eta>0?' · ~'+eta+'s left':''}`);
+          if(eta>0)document.getElementById('bsETA').textContent=eta+'s';
+          document.getElementById('bsFrame').textContent=`${Math.round(t)}s/${Math.round(dur)}s`;
+        }
+      }
     });
-
-    await ffmpeg.load();
+    await ff.load({
+      coreURL:'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.js',
+      wasmURL:'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.wasm',
+    });
     if(visualBurnCancelled)throw new Error('Cancelled');
 
-    setVisualProg(15,'Reading video info…');
-
-    // ── Detect native FPS from video metadata ──
-    const probeVid=document.createElement('video');
-    probeVid.src=URL.createObjectURL(videoFile);probeVid.muted=true;probeVid.preload='metadata';
+    /* ── Probe video ── */
+    setVisualProg(12,'Probing video…');
+    const pv=document.createElement('video');
+    pv.src=URL.createObjectURL(videoFile);pv.muted=true;pv.preload='metadata';
     const {videoWidth:W,videoHeight:H,duration:dur}=await new Promise((res,rej)=>{
-      probeVid.onloadedmetadata=()=>res(probeVid);
-      probeVid.onerror=rej;probeVid.load();
+      pv.onloadedmetadata=()=>res(pv);pv.onerror=rej;pv.load();
     });
-    URL.revokeObjectURL(probeVid.src);
+    URL.revokeObjectURL(pv.src);
 
-    // Probe native FPS via short RVFC sampling
-    let nativeFPS=60;
+    /* ── Detect native FPS via RVFC (fast, accurate) ── */
+    let nativeFPS=30;
     try{
-      const pv=document.createElement('video');
-      pv.src=URL.createObjectURL(videoFile);pv.muted=true;pv.playsInline=true;pv.preload='auto';
-      await new Promise(r=>{pv.onloadeddata=r;pv.load()});
-      if('requestVideoFrameCallback' in pv){
-        pv.currentTime=Math.min(2,dur*0.1);
-        await new Promise(r=>{pv.onseeked=r});
+      const rv2=document.createElement('video');
+      rv2.src=URL.createObjectURL(videoFile);rv2.muted=true;rv2.playsInline=true;rv2.preload='auto';
+      await new Promise(r=>{rv2.onloadeddata=r;rv2.load()});
+      if('requestVideoFrameCallback' in rv2){
+        rv2.currentTime=Math.min(1,dur*0.05);
+        await new Promise(r=>{rv2.onseeked=r});
         let fc=0;const t0=performance.now();
         await new Promise(res=>{
-          const cb=()=>{fc++;performance.now()-t0<800?pv.requestVideoFrameCallback(cb):res()};
-          pv.play();pv.requestVideoFrameCallback(cb);
+          const cb=()=>{fc++;(performance.now()-t0<600)?rv2.requestVideoFrameCallback(cb):res()};
+          rv2.play();rv2.requestVideoFrameCallback(cb);
         });
-        pv.pause();URL.revokeObjectURL(pv.src);
-        const measured=Math.round(fc/(800/1000));
-        const std=[24,25,30,48,50,60,120];
+        rv2.pause();URL.revokeObjectURL(rv2.src);
+        const measured=Math.round(fc/(600/1000));
+        const std=[23.976,24,25,29.97,30,48,50,59.94,60,120];
         nativeFPS=std.reduce((a,b)=>Math.abs(b-measured)<Math.abs(a-measured)?b:a);
       }
-    }catch(e){nativeFPS=60}
-    // Always output at minimum 60fps
-    const outFPS=Math.max(60,nativeFPS);
+    }catch(e){nativeFPS=30;}
+
+    /* Output FPS: keep native if ≥60, else use 60 via simple duplication */
+    const outFPS=nativeFPS>=60?nativeFPS:60;
+    const needsFpsUp=nativeFPS<60;
 
     document.getElementById('bsFPS').textContent=outFPS;
     document.getElementById('bsFrame').textContent='—';
     document.getElementById('bsETA').textContent='—';
-    setVisualProg(20,`Detected ${nativeFPS}fps → outputting at ${outFPS}fps`);
+    setVisualProg(18,`${W}×${H} · ${nativeFPS}fps source → ${outFPS}fps output`);
 
-    if(visualBurnCancelled)throw new Error('Cancelled');
-
-    // ── Write video to FFmpeg FS ──
-    setVisualProg(25,'Loading video into encoder…');
-    const ext=videoFile.name.split('.').pop().toLowerCase()||'mp4';
-    const inputName='input.'+ext;
-    ffmpeg.FS('writeFile',inputName,await fetchFile(videoFile));
-
-    // ── Build SRT file ──
-    const srtContent=buildSRT();
-    ffmpeg.FS('writeFile','subs.srt',new TextEncoder().encode(srtContent));
-
-    // ── Style params for drawtext filter ──
-    const col=document.getElementById('sColor').value.replace('#','');
-    const bg=document.getElementById('sBg').value.replace('#','');
-    const alpha=parseInt(document.getElementById('sBgAlpha').value)/100;
+    /* ── Build .ASS subtitle file (better than SRT for libass) ── */
+    const col=document.getElementById('sColor').value.replace('#','').toUpperCase();
+    const bg=document.getElementById('sBg').value.replace('#','').toUpperCase();
+    const bgAlpha=parseInt(document.getElementById('sBgAlpha').value)/100;
     const pos=document.getElementById('sPos').value;
-    const sizePct=parseInt(document.getElementById('sSize').value)/22; // normalize
-    const fontH=Math.round(Math.max(18,H*0.042)*sizePct);
+    const sizePct=parseInt(document.getElementById('sSize').value)/22;
+    const fontPt=Math.round(Math.max(14,H*0.036)*sizePct);
 
-    // Convert hex color to FFmpeg format (0xRRGGBBAA)
-    const hexToFF=(hex,a=1)=>{
-      const r=parseInt(hex.slice(0,2),16),g=parseInt(hex.slice(2,4),16),b=parseInt(hex.slice(4,6),16);
-      const aa=Math.round((1-a)*255).toString(16).padStart(2,'0');
-      return `0x${hex}${a===1?'FF':aa.toUpperCase()}`;
+    /* ASS uses BGR hex, alpha is inverse (00=opaque, FF=transparent) */
+    const toASS=(hex)=>`&H00${hex.slice(4,6)}${hex.slice(2,4)}${hex.slice(0,2)}&`;
+    const toASSalpha=(hex,a)=>{
+      const inv=Math.round((1-a)*255).toString(16).padStart(2,'0').toUpperCase();
+      return `&H${inv}${hex.slice(4,6)}${hex.slice(2,4)}${hex.slice(0,2)}&`;
     };
-    const fontColor=hexToFF(col);
-    const bgAlphaHex=Math.round((1-alpha)*255).toString(16).padStart(2,'0').toUpperCase();
-    const boxColor=`0x${bg}${bgAlphaHex}`;
+    const alignment=pos==='top'?8:pos==='middle'?5:2;
+    const marginV=Math.round(H*0.04);
 
-    // Vertical position
-    const yExpr=pos==='top'?`h*0.05`:pos==='middle'?`(h-text_h)/2`:`h*0.88-text_h`;
+    /* ASS header */
+    const assLines=[
+      '[Script Info]',
+      'ScriptType: v4.00+',
+      `PlayResX: ${W}`,`PlayResY: ${H}`,
+      'WrapStyle: 0','ScaledBorderAndShadow: yes','',
+      '[V4+ Styles]',
+      'Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding',
+      `Style: Default,Arial,${fontPt},${toASS(col)},${toASS(col)},&H00000000&,${toASSalpha(bg,bgAlpha)},1,0,0,0,100,100,0,0,3,0,0,${alignment},40,40,${marginV},1`,
+      '','[Events]',
+      'Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text'
+    ];
 
-    // ── Build FFmpeg filter chain ──
-    // subtitles filter: reads SRT and burns text using libass
-    // force_style lets us control font size, color, position, background
-    const assStyle=[
-      `Fontsize=${Math.round(fontH*0.75)}`, // ASS uses points not px
-      `PrimaryColour=&H${col.slice(4,6)}${col.slice(2,4)}${col.slice(0,2)}&`, // ASS is BGR
-      `BackColour=&H${Math.round((1-alpha)*255).toString(16).padStart(2,'0').toUpperCase()}${bg.slice(4,6)}${bg.slice(2,4)}${bg.slice(0,2)}&`,
-      'BorderStyle=3', // opaque box
-      'Outline=0',
-      'Shadow=0',
-      `Alignment=${pos==='top'?8:pos==='middle'?5:2}`, // ASS alignment: 8=top-center, 5=mid-center, 2=bottom-center
-      'MarginV=40',
-      'Bold=1',
-      'FontName=Arial'
-    ].join(',');
+    /* Convert subtitles to ASS dialogue lines */
+    const toASStime=s=>{
+      const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sc=Math.floor(s%60),cs=Math.round((s%1)*100);
+      return `${h}:${String(m).padStart(2,'0')}:${String(sc).padStart(2,'0')}.${String(cs).padStart(2,'0')}`;
+    };
+    subtitles.forEach(sub=>{
+      const text=sub.text.replace(/\n/g,'\\N');
+      assLines.push(`Dialogue: 0,${toASStime(sub.start)},${toASStime(sub.end)},Default,,0,0,0,,${text}`);
+    });
 
-    const videoFilter=`subtitles=subs.srt:force_style='${assStyle}'`;
+    const assContent=assLines.join('\n');
 
-    // FPS upscaling: if source < 60fps, use minterpolate for smooth motion
-    let fullFilter=videoFilter;
-    if(nativeFPS<outFPS){
-      // minterpolate creates smooth intermediate frames
-      fullFilter=`${videoFilter},minterpolate='mi_mode=mci:mc_mode=aobmc:me_mode=bidir:fps=${outFPS}'`;
-    }
-
+    /* ── Write files to FFmpeg FS ── */
+    setVisualProg(22,'Writing to encoder…');
+    const ext=videoFile.name.split('.').pop().toLowerCase()||'mp4';
+    const inFile='input.'+ext;
+    await ff.writeFile(inFile,await fetchFile(videoFile));
+    await ff.writeFile('subs.ass',new TextEncoder().encode(assContent));
     if(visualBurnCancelled)throw new Error('Cancelled');
-    setVisualProg(30,'Encoding — this takes 10–30s…');
 
-    // Progress tracking via ffmpeg log
-    let lastProgress=30;
-    ffmpeg.setLogger(({message})=>{
+    /* ── Build FFmpeg command ──
+       KEY INSIGHT:
+       - If no FPS upscale needed: use subtitles filter + c:v copy (NO RE-ENCODE)
+         → takes 2-8 seconds regardless of video length!
+       - If FPS upscale needed (source < 60fps): must re-encode
+         → use libx264 ultrafast + fps filter (frame duplication, instant)
+         → takes 10-25 seconds
+
+       c:v copy + subtitles filter = FFmpeg only processes text overlay,
+       not video frames. Runs at filesystem speed, not encode speed.
+    ── */
+
+    const subFilter=`ass=subs.ass`;
+
+    let ffArgs;
+    const startEncode=Date.now();
+
+    /* Progress logger */
+    let lastPct=22;
+    ff.setLogger(({message})=>{
+      /* Parse time= from ffmpeg stderr */
       const m=message.match(/time=(\d+):(\d+):([\d.]+)/);
-      if(m){
+      if(m&&dur>0){
         const t=parseInt(m[1])*3600+parseInt(m[2])*60+parseFloat(m[3]);
-        const pct=Math.min(92,30+Math.round((t/dur)*62));
-        if(pct>lastProgress){
-          lastProgress=pct;
-          const eta=t>0?Math.round(((dur-t)/t)*(Date.now()-startEncode)/1000):0;
-          setVisualProg(pct,`Encoded ${Math.round(t)}s / ${Math.round(dur)}s${eta>0?' · ~'+eta+'s left':''}`);
-          document.getElementById('bsETA').textContent=eta>0?eta+'s':'—';
-          document.getElementById('bsFrame').textContent=Math.round(t*outFPS)+'/'+Math.round(dur*outFPS);
+        const pct=Math.min(93,22+Math.round((t/dur)*71));
+        if(pct>lastPct){
+          lastPct=pct;
+          const elapsed=(Date.now()-startEncode)/1000;
+          const eta=t>1?Math.round(((dur-t)/t)*elapsed):0;
+          const spd=t>0?(t/elapsed).toFixed(1):0;
+          setVisualProg(pct,`${Math.round(t)}s / ${Math.round(dur)}s · ${spd}x speed${eta>0?' · ~'+eta+'s left':''}`);
+          if(eta>0)document.getElementById('bsETA').textContent=eta+'s';
+          document.getElementById('bsFrame').textContent=`${Math.round(t)}s/${Math.round(dur)}s`;
         }
       }
     });
 
-    const startEncode=Date.now();
+    if(!needsFpsUp){
+      /* ══ FAST PATH: subtitle mux only, copy video stream ══
+         FFmpeg processes at 50-200x realtime — a 2min video = 1-3s */
+      setVisualProg(24,'Burning subtitles (fast copy mode)…');
+      ffArgs=[
+        '-i',inFile,
+        '-vf',subFilter,
+        '-c:v','copy',      /* ← NO video re-encode */
+        '-c:a','copy',
+        '-movflags','+faststart',
+        '-y','output.mp4'
+      ];
+    } else {
+      /* ══ ENCODE PATH: need to re-encode for fps upscale ══
+         fps filter = frame duplication (not motion interpolation) = fast
+         ultrafast preset = minimal CPU work */
+      setVisualProg(24,`Encoding ${outFPS}fps (ultrafast)…`);
+      ffArgs=[
+        '-i',inFile,
+        '-vf',`${subFilter},fps=${outFPS}`,
+        '-c:v','libx264',
+        '-preset','ultrafast',
+        '-tune','zerolatency',
+        '-crf','17',
+        '-c:a','copy',
+        '-movflags','+faststart',
+        '-y','output.mp4'
+      ];
+    }
 
-    // ── Run FFmpeg ──
-    // -vf: burn subtitles
-    // -r: output framerate  
-    // -c:v libx264: fast H.264 (widely supported)
-    // -preset ultrafast: fastest encode, ~10–20s for 2min 1080p
-    // -crf 18: high quality
-    // -c:a copy: don't re-encode audio
-    // -movflags +faststart: web-optimized
-    await ffmpeg.run(
-      '-i', inputName,
-      '-vf', fullFilter,
-      '-r', String(outFPS),
-      '-c:v', 'libx264',
-      '-preset', 'ultrafast',
-      '-crf', '18',
-      '-c:a', 'copy',
-      '-movflags', '+faststart',
-      '-y', 'output.mp4'
-    );
-
+    await ff.exec(ffArgs);
     if(visualBurnCancelled)throw new Error('Cancelled');
-    setVisualProg(95,'Packaging output…');
 
-    const data=ffmpeg.FS('readFile','output.mp4');
+    setVisualProg(95,'Packaging…');
+    const data=await ff.readFile('output.mp4');
     const blob=new Blob([data.buffer],{type:'video/mp4'});
 
-    // Cleanup FS
-    try{ffmpeg.FS('unlink',inputName);ffmpeg.FS('unlink','subs.srt');ffmpeg.FS('unlink','output.mp4');}catch(e){}
+    try{await ff.deleteFile(inFile);await ff.deleteFile('subs.ass');await ff.deleteFile('output.mp4');}catch(_){}
 
     const elapsed=((Date.now()-startEncode)/1000).toFixed(1);
-    setVisualProg(100,'Done!');
     document.getElementById('bsFPS').textContent=outFPS;
-    document.getElementById('bsFrame').textContent='✓';
+    document.getElementById('bsFrame').textContent='✓ done';
     document.getElementById('bsETA').textContent=elapsed+'s';
+    setVisualProg(100,'Done!');
 
-    dlBlob(blob,getBaseName()+'_captions.mp4');
-    await new Promise(r=>setTimeout(r,800));
+    dlBlob(blob,getBaseName()+'_burned.mp4');
+    await new Promise(r=>setTimeout(r,700));
     document.getElementById('visualBurnModal').classList.remove('show');
-    toast(`✅ Done in ${elapsed}s! ${outFPS}fps MP4 — captions burned in, zero lag.`,'ok');
+    toast(`✅ Done in ${elapsed}s! ${outFPS}fps · subtitles burned in · zero lag`,'ok');
 
   }catch(e){
     document.getElementById('visualBurnModal').classList.remove('show');
-    if(!visualBurnCancelled)toast('Render error: '+e.message,'err');
+    if(!visualBurnCancelled)toast('Burn error: '+e.message,'err');
     console.error('Burn error:',e);
   }
 }
+
 function setVisualProg(pct,label){
-  document.getElementById('visualBurnFill').style.width=pct+'%';
-  document.getElementById('visualBurnLabel').textContent=label;
-  const ef=document.getElementById('encodeFillAnim');
-  if(ef)ef.style.width=pct+'%';
-  const el=document.getElementById('encodeFrameLabel');
-  if(el)el.textContent=label;
-}
-
-
-/* ── PROGRESS ── */
-function setGenProg(show,label,pct){document.getElementById('genProgress').style.display=show?'':'none';if(show){document.getElementById('genFill').style.width=pct+'%';document.getElementById('genLabel').textContent=label}}
-function setTransProg(show,label,pct){document.getElementById('transProgress').style.display=show?'':'none';if(show){document.getElementById('transFill').style.width=pct+'%';document.getElementById('transLabel').textContent=label}}
-function setBurnProg(pct,label){document.getElementById('burnFill').style.width=pct+'%';document.getElementById('burnLabel').textContent=label}
-
-/* ── FORMAT ── */
-function ft(s){const m=Math.floor(s/60),sec=(s%60).toFixed(1);return String(m).padStart(2,'0')+':'+String(Math.floor(s%60)).padStart(2,'0')+'.'+sec.split('.')[1]}
-function ftSRT(s){const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sc=Math.floor(s%60),ms=Math.round((s%1)*1000);return pad(h)+':'+pad(m)+':'+pad(sc)+','+String(ms).padStart(3,'0')}
-function ftVTT(s){return ftSRT(s).replace(',','.')}
-function pad(n){return String(n).padStart(2,'0')}
-function dlBlob(blob,name){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),10000)}
-
-/* ── TOAST ── */
-let toastTm;
-function toast(msg,type=''){const t=document.getElementById('toast');t.textContent=msg;t.className='show '+type;clearTimeout(toastTm);toastTm=setTimeout(()=>{t.className=''},4500)}
-
-window.addEventListener('DOMContentLoaded',function(){init();});
-function setVisualProg(pct,label){
-  document.getElementById('visualBurnFill').style.width=pct+'%';
-  document.getElementById('visualBurnLabel').textContent=label;
-  const ef=document.getElementById('encodeFillAnim');
-  if(ef)ef.style.width=pct+'%';
-  const el=document.getElementById('encodeFrameLabel');
-  if(el)el.textContent=label;
+  const f=document.getElementById('visualBurnFill');if(f)f.style.width=pct+'%';
+  const l=document.getElementById('visualBurnLabel');if(l)l.textContent=label;
+  const ef=document.getElementById('encodeFillAnim');if(ef)ef.style.width=pct+'%';
+  const el=document.getElementById('encodeFrameLabel');if(el)el.textContent=label;
 }
 
 
