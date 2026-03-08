@@ -146,9 +146,9 @@ body {
 .hero {
   text-align: center;
   padding: 72px 0 52px;
-  animation: fadeUp .6s ease both;
+  animation: fadeUp .4s ease both;
 }
-@keyframes fadeUp { from{opacity:0;transform:translateY(16px)} to{opacity:1;transform:none} }
+@keyframes fadeUp { from{opacity:0;transform:translateY(12px)} to{opacity:1;transform:translateY(0)} }
 
 .hero-eyebrow {
   display: inline-flex; align-items: center; gap: 6px;
@@ -193,7 +193,7 @@ body {
 .metric-lbl { font-size: .65rem; color: var(--txt3); letter-spacing: .5px; text-transform: uppercase; margin-top: 1px }
 
 /* ── UPLOAD ── */
-#uploadWrap { animation: fadeUp .6s .1s ease both; opacity: 0; animation-fill-mode: both }
+#uploadWrap { animation: fadeUp .5s .05s ease both }
 .upload-zone {
   border: 1.5px dashed var(--border2);
   border-radius: 12px;
@@ -209,7 +209,7 @@ body {
   border-color: var(--accent);
   background: var(--raised);
 }
-.upload-zone input { position: absolute; inset: 0; opacity: 0; cursor: pointer }
+.upload-zone input { position: absolute; inset: 0; opacity: 0; cursor: pointer; z-index: 2; width: 100%; height: 100%; }
 .upload-icon {
   width: 44px; height: 44px; border-radius: 10px;
   background: var(--raised); border: 1px solid var(--border);
@@ -226,7 +226,7 @@ body {
 }
 
 /* ── URL SECTION ── */
-#urlSection { max-width: 600px; margin: 0 auto 60px; animation: fadeUp .6s .15s ease both; opacity: 0; animation-fill-mode: both }
+#urlSection { max-width: 600px; margin: 0 auto 60px; animation: fadeUp .5s .1s ease both }
 .url-divider {
   display: flex; align-items: center; gap: 12px; margin: 16px 0 12px;
 }
@@ -861,8 +861,8 @@ body {
 
 <!-- UPLOAD -->
 <div id="uploadWrap">
-  <div class="upload-zone" id="uploadZone">
-    <input type="file" id="fileInput" accept="video/*"/>
+  <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()">
+    <input type="file" id="fileInput" accept="video/*" onclick="event.stopPropagation()"/>
     <div class="upload-icon">📁</div>
     <h2>Drop your video here</h2>
     <p>MP4, WebM, MOV, AVI — or click to browse</p>
@@ -1792,6 +1792,24 @@ async function renderVisualBurn(){
   }
 }
 
+/* ── FORMAT & UTILITY ── */
+function ft(s){const m=Math.floor(s/60),sec=(s%60).toFixed(1);return String(m).padStart(2,'0')+':'+String(Math.floor(s%60)).padStart(2,'0')+'.'+sec.split('.')[1]}
+function ftSRT(s){const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sc=Math.floor(s%60),ms=Math.round((s%1)*1000);return pad(h)+':'+pad(m)+':'+pad(sc)+','+String(ms).padStart(3,'0')}
+function ftVTT(s){return ftSRT(s).replace(',','.')}
+function pad(n){return String(n).padStart(2,'0')}
+function dlBlob(blob,name){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},10000)}
+
+/* ── TOAST ── */
+let toastTm;
+function toast(msg,type=''){
+  const t=document.getElementById('toast');
+  if(!t)return;
+  t.textContent=msg;
+  t.className='show'+(type?' '+type:'');
+  clearTimeout(toastTm);
+  toastTm=setTimeout(()=>{t.className=''},4500);
+}
+
 function setVisualProg(pct,label){
   const f=document.getElementById('visualBurnFill');if(f)f.style.width=pct+'%';
   const l=document.getElementById('visualBurnLabel');if(l)l.textContent=label;
@@ -2161,7 +2179,7 @@ window.addEventListener('DOMContentLoaded',function(){
       ctx.beginPath();ctx.moveTo(s.x,s.y);ctx.lineTo(s.x,s.y+s.len);ctx.stroke();
     });
 
-    // Particles + connections ++ 4:13 PM - 8th march commit
+    // Particles + connections
     PTS.forEach(p=>{
       p.x+=p.vx;p.y+=p.vy;
       if(p.x<0||p.x>W)p.vx*=-1;if(p.y<0||p.y>H)p.vy*=-1;
@@ -2180,6 +2198,7 @@ window.addEventListener('DOMContentLoaded',function(){
   }
   draw();
 })();
+init();
 });
 
 </script>
