@@ -805,27 +805,26 @@ body::after{
   <div class="modal-box" style="max-width:420px">
     <div style="padding:24px">
       <div style="font-family:var(--sans);font-size:1rem;font-weight:700;margin-bottom:8px;color:var(--txt)">
-        ⚠ No captions found — <span id="urlFallbackPlatform"></span>
+        ⚠ No captions — <span id="urlFallbackPlatform"></span>
       </div>
       <p id="urlFallbackMsg" style="font-size:.68rem;color:var(--red);font-family:var(--mono);line-height:1.6;margin-bottom:12px;padding:8px;background:var(--red2);border:1px solid rgba(255,59,92,.2)"></p>
-      <p style="font-size:.7rem;color:var(--txt2);font-family:var(--mono);line-height:1.8;margin-bottom:16px">
-        <strong style="color:var(--neon)">// Solution:</strong> Download the video audio and upload it here.<br>
-        Whisper will transcribe the actual speech with full accuracy.<br><br>
-        <strong style="color:var(--amber)">How to download:</strong><br>
-        1. Install <code style="color:var(--amber)">yt-dlp</code> (free, open source)<br>
-        2. Run: <code style="background:var(--raised);padding:2px 6px;display:block;margin:4px 0;color:var(--neon)">yt-dlp -x --audio-format mp3 &lt;URL&gt;</code>
-        3. Upload the .mp3 file above → Whisper transcribes it perfectly<br><br>
-        <a id="urlFallbackLink" href="#" target="_blank" rel="noopener"
-           style="color:var(--txt3);text-decoration:underline;word-break:break-all;font-size:.62rem"></a>
-      </p>
-      <div style="display:flex;gap:8px">
-        <button class="btn btn-ghost" style="flex:1;justify-content:center;font-size:.65rem"
-          onclick="document.getElementById('urlFallbackModal').classList.remove('show')">[ CLOSE ]</button>
-        <a href="https://github.com/yt-dlp/yt-dlp" target="_blank" rel="noopener"
-          class="btn btn-amber" style="flex:1;justify-content:center;font-size:.65rem;text-decoration:none">
-          yt-dlp ↗
-        </a>
+
+      <div style="font-size:.7rem;color:var(--txt2);font-family:var(--mono);line-height:1.8;margin-bottom:4px">
+        <strong style="color:var(--neon)">// Best option — download audio &amp; upload:</strong>
       </div>
+      <div style="background:var(--raised);border:1px solid var(--line);padding:10px 12px;margin-bottom:14px;font-size:.68rem;font-family:var(--mono);line-height:2">
+        <span style="color:var(--txt3)">1.</span> Install <a href="https://github.com/yt-dlp/yt-dlp" target="_blank" style="color:var(--amber)">yt-dlp</a> <span style="color:var(--txt3)">(free)</span><br>
+        <span style="color:var(--txt3)">2.</span> Run in terminal:<br>
+        <code id="ytdlpCmd" style="display:block;background:var(--deep);color:var(--neon);padding:6px 8px;margin:4px 0;font-size:.65rem;word-break:break-all">yt-dlp -x --audio-format mp3 "<span id="urlFallbackLinkText"></span>"</code>
+        <button onclick="copyYtdlpCmd()" style="background:var(--neon3);border:1px solid var(--line2);color:var(--neon);font-family:var(--mono);font-size:.6rem;padding:3px 10px;cursor:pointer;margin-top:2px">[ COPY CMD ]</button><br>
+        <span style="color:var(--txt3)">3.</span> Upload the <code style="color:var(--amber)">.mp3</code> file → <strong style="color:var(--neon)">Whisper transcribes it perfectly</strong>
+      </div>
+
+      <a id="urlFallbackLink" href="#" target="_blank" rel="noopener"
+         style="display:block;color:var(--txt3);text-decoration:underline;word-break:break-all;font-size:.6rem;margin-bottom:14px"></a>
+
+      <button class="btn btn-neon" style="width:100%;justify-content:center;font-size:.65rem"
+        onclick="document.getElementById('urlFallbackModal').classList.remove('show')">[ CLOSE ]</button>
     </div>
   </div>
 </div>
@@ -1601,8 +1600,8 @@ async function loadFromUrl(){
     return;
   }
 
-  // For YouTube/social — use Groq LLM to generate subtitles from transcript
-  setUrlStep(1,'Identifying video…');
+  // For YouTube — fetch real captions via worker proxy → YouTube timedtext API
+  setUrlStep(1,'Connecting to YouTube…');
   const isYouTube=/youtube\.com|youtu\.be/.test(url);
 
   if(isYouTube){
@@ -1692,14 +1691,21 @@ function decodeHTMLEntities(text){
   return el.value;
 }
 
+function copyYtdlpCmd(){
+  const cmd=document.getElementById('ytdlpCmd')?.textContent||'';
+  navigator.clipboard?.writeText(cmd).then(()=>toast('Command copied!','ok')).catch(()=>toast('Copy failed','err'));
+}
+
 function showNoCaptionsModal(ytId, reason){
   const modal=document.getElementById('urlFallbackModal');
   document.getElementById('urlFallbackPlatform').textContent='YouTube';
-  const link=document.getElementById('urlFallbackLink');
   const ytUrl='https://youtube.com/watch?v='+ytId;
+  const link=document.getElementById('urlFallbackLink');
   link.href=ytUrl; link.textContent=ytUrl;
+  const linkText=document.getElementById('urlFallbackLinkText');
+  if(linkText) linkText.textContent=ytUrl;
   const msg=document.getElementById('urlFallbackMsg');
-  if(msg) msg.textContent=reason||'No captions available for this video.';
+  if(msg) msg.textContent=reason||'This video has no captions available on YouTube.';
   modal.classList.add('show');
 }
 function loadYouTubePlayer(ytId){
