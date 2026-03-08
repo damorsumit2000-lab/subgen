@@ -124,7 +124,12 @@ export default {
     // ── Static assets ──
     const response = await env.ASSETS.fetch(request);
     const newRes = new Response(response.body, response);
-    Object.entries({ ...COOP, ...corsHeaders }).forEach(([k, v]) => newRes.headers.set(k, v));
+    // CRITICAL: These headers enable SharedArrayBuffer (required by FFmpeg WASM)
+    // Must be on EVERY response including the HTML page itself
+    newRes.headers.set('Cross-Origin-Opener-Policy', 'same-origin');
+    newRes.headers.set('Cross-Origin-Embedder-Policy', 'require-corp');
+    newRes.headers.set('Cross-Origin-Resource-Policy', 'cross-origin');
+    newRes.headers.set('Access-Control-Allow-Origin', '*');
     return newRes;
   }
 }
