@@ -124,12 +124,21 @@ export default {
     // ── Static assets ──
     const response = await env.ASSETS.fetch(request);
     const newRes = new Response(response.body, response);
-    // CRITICAL: These headers enable SharedArrayBuffer (required by FFmpeg WASM)
-    // Must be on EVERY response including the HTML page itself
     newRes.headers.set('Cross-Origin-Opener-Policy', 'same-origin');
     newRes.headers.set('Cross-Origin-Embedder-Policy', 'require-corp');
     newRes.headers.set('Cross-Origin-Resource-Policy', 'cross-origin');
     newRes.headers.set('Access-Control-Allow-Origin', '*');
+    // Allow FFmpeg WASM scripts and workers from CDN sources
+    newRes.headers.set('Content-Security-Policy',
+      "default-src 'self'; " +
+      "script-src 'self' 'unsafe-eval' https://cdn.jsdelivr.net https://unpkg.com https://fonts.googleapis.com; " +
+      "worker-src 'self' blob: https://cdn.jsdelivr.net https://unpkg.com; " +
+      "connect-src 'self' https://cdn.jsdelivr.net https://unpkg.com https://api.groq.com https://www.youtube.com https://fonts.googleapis.com https://fonts.gstatic.com; " +
+      "font-src 'self' https://fonts.gstatic.com; " +
+      "img-src 'self' data: blob:; " +
+      "media-src 'self' blob:; " +
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;"
+    );
     return newRes;
   }
 }
