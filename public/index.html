@@ -10,8 +10,7 @@
 <link rel="apple-touch-icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxODAgMTgwIj4KICA8cmVjdCB3aWR0aD0iMTgwIiBoZWlnaHQ9IjE4MCIgcng9IjQwIiBmaWxsPSIjMWExYTFhIi8+CiAgPHJlY3QgeD0iMzYiIHk9IjU1IiB3aWR0aD0iMTA4IiBoZWlnaHQ9IjE0IiByeD0iNyIgZmlsbD0id2hpdGUiLz4KICA8cmVjdCB4PSIzNiIgeT0iODMiIHdpZHRoPSI4NCIgaGVpZ2h0PSIxNCIgcng9IjciIGZpbGw9IndoaXRlIi8+CiAgPHJlY3QgeD0iMzYiIHk9IjExMSIgd2lkdGg9IjYwIiBoZWlnaHQ9IjE0IiByeD0iNyIgZmlsbD0id2hpdGUiLz4KPC9zdmc+">
 <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#1c1c1c" media="(prefers-color-scheme: dark)">
-<!-- FFmpeg WASM 0.11 — single-thread, no Worker, no SharedArrayBuffer -->
-<script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
+<!-- FFmpeg WASM loaded dynamically inside mux/burn functions -->
 <style>
 /* =============================================
    CaptionCraft — Minimal Classy
@@ -1487,7 +1486,7 @@ async function translateSubs(){
     }
     subtitles=result;setTransProg(true,'Done!',100);setTimeout(()=>setTransProg(false),800);
     renderList();toast('✅ Translated to '+langName+'!','ok');
-  }catch(e){setTransProg(false);toast('Translation error: '+e.message,'err');console.error(e)}
+  }catch(e){setTransProg(false);console.error('Translate error:',e);showAppError(e.message||'Translation failed');}
   btn.disabled=false;btn.innerHTML='🌐 Translate';
 }
 
@@ -1526,7 +1525,8 @@ function cancelBurn(){burnCancelled=true;stopMemeCarousel();document.getElementB
 async function muxSubsIntoVideo(){
   try{
     setBurnProg(5,'Loading FFmpeg…');
-    const {createFFmpeg,fetchFile:fetchFile2}=FFmpeg;
+    const mod2=await makeFFmpeg();
+    const {createFFmpeg,fetchFile:fetchFile2}=mod2;
     const ffmpeg=createFFmpeg({
       log:false,
       corePath:'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js',
@@ -1550,11 +1550,37 @@ async function muxSubsIntoVideo(){
     setTimeout(()=>{document.getElementById('burnModal').classList.remove('show');toast('✅ MKV downloaded! Subtitles embedded & toggleable in VLC.','ok')},1200);
   }catch(e){
     stopMemeCarousel();document.getElementById('burnModal').classList.remove('show');
-    if(!burnCancelled){console.warn('FFmpeg failed:',e);toast('⚠ Mux failed — downloading Video + SRT instead.','');dlVideoAndSRT()}
+    if(!burnCancelled){console.error('Mux error:',e);toast('Subtitle embedding failed — downloading as separate files instead.','err');dlVideoAndSRT();}
   }
 }
 
 /* ── VISUAL BURN-IN (captions baked into pixels) ── */
+/* ── FFmpeg lazy loader ── */
+let _ffmpegLoaded = false;
+async function loadFFmpegScript(){
+  if(window.FFmpeg && window.FFmpeg.createFFmpeg) return; // already loaded
+  if(_ffmpegLoaded) return;
+  return new Promise((resolve, reject)=>{
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js';
+    s.onload = ()=>{ _ffmpegLoaded=true; resolve(); };
+    s.onerror = ()=> reject(new Error('Failed to load FFmpeg. Check your internet connection.'));
+    document.head.appendChild(s);
+  });
+}
+async function makeFFmpeg(){
+  await loadFFmpegScript();
+  // 0.11 UMD exposes either window.FFmpeg or window.FFmpeg.FFmpeg
+  const mod = (window.FFmpeg && window.FFmpeg.createFFmpeg)
+    ? window.FFmpeg
+    : (window.FFmpeg && window.FFmpeg.FFmpeg)
+    ? window.FFmpeg.FFmpeg
+    : null;
+  if(!mod) throw new Error('FFmpeg WASM unavailable — try reloading the page.');
+  return mod;
+}
+
+
 function startVisualBurn(){
   if(!subtitles.length){toast('Generate subtitles first.','err');return}
   if(!videoFile){toast('No video loaded.','err');return}
@@ -1580,7 +1606,8 @@ function cancelVisualBurn(){
 async function renderVisualBurn(){
   try{
     setVisualProg(5,'Loading FFmpeg…');
-    const {createFFmpeg,fetchFile}=FFmpeg;
+    const mod=await makeFFmpeg();
+    const {createFFmpeg,fetchFile}=mod;
     const ff=createFFmpeg({
       log:false,
       corePath:'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js',
@@ -1782,8 +1809,7 @@ async function renderVisualBurn(){
 
   }catch(e){
     document.getElementById('visualBurnModal').classList.remove('show');
-    if(!visualBurnCancelled)toast('Burn error: '+e.message,'err');
-    console.error('Burn error:',e);
+    if(!visualBurnCancelled){ console.error('Burn error:',e); showAppError(e.message||'Burn failed'); }
   }
 }
 
@@ -2085,6 +2111,42 @@ function updateThemeIcon(theme){
   if(btn)btn.title=theme==='dark'?'Switch to Light Mode':'Switch to Dark Mode';
 }
 
+
+/* ── Global error handler: friendly messages for all uncaught errors ── */
+window.addEventListener('error', function(e){
+  console.error('App error:', e.error || e.message);
+  // Don't show toast for script-load errors on external resources
+  if(e.filename && !e.filename.includes(location.hostname)) return;
+  showAppError(e.message || 'An unexpected error occurred.');
+});
+window.addEventListener('unhandledrejection', function(e){
+  console.error('Unhandled promise rejection:', e.reason);
+  const msg = (e.reason && e.reason.message) ? e.reason.message : String(e.reason||'Unknown error');
+  // Suppress cancelled/abort errors
+  if(/cancel|abort|cancelled/i.test(msg)) return;
+  showAppError(msg);
+  e.preventDefault();
+});
+function showAppError(msg){
+  // Map technical errors to friendly messages
+  const friendly = {
+    'FFmpeg': 'Video processor unavailable — please reload the page.',
+    'SharedArrayBuffer': 'Browser security setting blocking video processor. Try Chrome or Edge.',
+    'fetch': 'Network error — check your connection and try again.',
+    'NetworkError': 'Network error — check your connection and try again.',
+    'AbortError': null, // silent
+    'QuotaExceeded': 'Not enough browser storage — try a smaller video.',
+    'out of memory': 'Video too large for browser memory — try a shorter clip.',
+    'Worker': 'Video processor blocked by browser — please reload.',
+    'wasm': 'Video processor failed to load — please reload the page.',
+  };
+  let message = 'Something went wrong — please try again.';
+  for(const [key, val] of Object.entries(friendly)){
+    if(val && msg.toLowerCase().includes(key.toLowerCase())){ message = val; break; }
+  }
+  if(!msg || /null|undefined/.test(msg)) message = 'Something went wrong — please try again.';
+  toast(message, 'err');
+}
 // Script is at bottom of <body> — DOM is ready. Call init() directly.
 // Also guard with DOMContentLoaded in case of async/defer edge cases.
 if(document.readyState==='loading'){
