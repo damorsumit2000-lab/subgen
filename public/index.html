@@ -861,7 +861,7 @@ body {
 <!-- UPLOAD -->
 <div id="uploadWrap">
   <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()">
-    <input type="file" id="fileInput" accept="video/*" onchange="if(this.files[0])loadFile(this.files[0])" onclick="event.stopPropagation()"/>
+    <input type="file" id="fileInput" accept="video/*" onclick="event.stopPropagation()"/>
     <div class="upload-icon">📁</div>
     <h2>Drop your video here</h2>
     <p>MP4, WebM, MOV, AVI — or click to browse</p>
@@ -1540,7 +1540,7 @@ async function muxSubsIntoVideo(){
     if(burnCancelled)throw new Error('Cancelled');
     setBurnProg(35,'Muxing subtitles…');
     ffmpeg.setProgress(({ratio})=>{if(ratio>=0&&ratio<=1)setBurnProg(35+Math.round(ratio*60),'Processing… '+Math.round(ratio*100)+'%')});
-    await ffmpeg.run('-i',inputName,'-i','subs.srt','-map','0:v:0','-map','0:a:0','-map','1:0','-c:v','copy','-c:a','copy','-c:s','srt','-metadata:s:s:0','language=und','-metadata:s:s:0','handler_name=Subtitles','-disposition:s:0','default+forced','-y','output.mkv']);
+    await ffmpeg.run('-i',inputName,'-i','subs.srt','-map','0:v:0','-map','0:a:0','-map','1:0','-c:v','copy','-c:a','copy','-c:s','srt','-metadata:s:s:0','language=und','-metadata:s:s:0','handler_name=Subtitles','-disposition:s:0','default+forced','-y','output.mkv');
     if(burnCancelled)throw new Error('Cancelled');
     setBurnProg(97,'Saving…');
     const data=ffmpeg.FS('readFile','output.mkv');
@@ -2085,7 +2085,13 @@ function updateThemeIcon(theme){
   if(btn)btn.title=theme==='dark'?'Switch to Light Mode':'Switch to Dark Mode';
 }
 
-window.addEventListener('DOMContentLoaded', function(){ init(); });
+// Script is at bottom of <body> — DOM is ready. Call init() directly.
+// Also guard with DOMContentLoaded in case of async/defer edge cases.
+if(document.readyState==='loading'){
+  document.addEventListener('DOMContentLoaded', init);
+} else {
+  init();
+}
 
 
 </script>
