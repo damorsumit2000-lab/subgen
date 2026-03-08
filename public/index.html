@@ -10,9 +10,8 @@
 <link rel="apple-touch-icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxODAgMTgwIj4KICA8cmVjdCB3aWR0aD0iMTgwIiBoZWlnaHQ9IjE4MCIgcng9IjQwIiBmaWxsPSIjMWExYTFhIi8+CiAgPHJlY3QgeD0iMzYiIHk9IjU1IiB3aWR0aD0iMTA4IiBoZWlnaHQ9IjE0IiByeD0iNyIgZmlsbD0id2hpdGUiLz4KICA8cmVjdCB4PSIzNiIgeT0iODMiIHdpZHRoPSI4NCIgaGVpZ2h0PSIxNCIgcng9IjciIGZpbGw9IndoaXRlIi8+CiAgPHJlY3QgeD0iMzYiIHk9IjExMSIgd2lkdGg9IjYwIiBoZWlnaHQ9IjE0IiByeD0iNyIgZmlsbD0id2hpdGUiLz4KPC9zdmc+">
 <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#1c1c1c" media="(prefers-color-scheme: dark)">
-<!-- FFmpeg WASM 0.12 — single-thread build, no SharedArrayBuffer needed -->
-<script src="https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.js"></script>
-<script src="https://unpkg.com/@ffmpeg/util@0.12.1/dist/umd/index.js"></script>
+<!-- FFmpeg WASM 0.11 — single-thread, no Worker, no SharedArrayBuffer -->
+<script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
 <style>
 /* =============================================
    CaptionCraft — Minimal Classy
@@ -1527,28 +1526,26 @@ function cancelBurn(){burnCancelled=true;stopMemeCarousel();document.getElementB
 async function muxSubsIntoVideo(){
   try{
     setBurnProg(5,'Loading FFmpeg…');
-    const {FFmpeg:FFmpegClass2}=FFmpegWASM;
-    const {fetchFile:fetchFile2}=FFmpegUtil;
-    const ffmpeg=new FFmpegClass2();
-    ffmpeg.on('log',()=>{});
-    await ffmpeg.load({
-      coreURL:'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.js',
-      wasmURL:'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.wasm',
-    });if(burnCancelled)throw new Error('Cancelled');
+    const {createFFmpeg,fetchFile:fetchFile2}=FFmpeg;
+    const ffmpeg=createFFmpeg({
+      log:false,
+      corePath:'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js',
+    });
+    await ffmpeg.load();if(burnCancelled)throw new Error('Cancelled');
     setBurnProg(20,'Preparing files…');
     const ext=videoFile.name.split('.').pop().toLowerCase()||'mp4';
     const inputName='input.'+ext;
-    await ffmpeg.writeFile(inputName,await fetchFile2(videoFile));
-    await ffmpeg.writeFile('subs.srt',new TextEncoder().encode(buildSRT()));
+    ffmpeg.FS('writeFile',inputName,await fetchFile2(videoFile));
+    ffmpeg.FS('writeFile','subs.srt',new TextEncoder().encode(buildSRT()));
     if(burnCancelled)throw new Error('Cancelled');
     setBurnProg(35,'Muxing subtitles…');
-    ffmpeg.on('progress',({progress})=>{if(progress>=0&&progress<=1)setBurnProg(35+Math.round(progress*60),'Processing… '+Math.round(progress*100)+'%')});
-    await ffmpeg.exec(['-i',inputName,'-i','subs.srt','-map','0:v:0','-map','0:a:0','-map','1:0','-c:v','copy','-c:a','copy','-c:s','srt','-metadata:s:s:0','language=und','-metadata:s:s:0','handler_name=Subtitles','-disposition:s:0','default+forced','-y','output.mkv']);
+    ffmpeg.setProgress(({ratio})=>{if(ratio>=0&&ratio<=1)setBurnProg(35+Math.round(ratio*60),'Processing… '+Math.round(ratio*100)+'%')});
+    await ffmpeg.run('-i',inputName,'-i','subs.srt','-map','0:v:0','-map','0:a:0','-map','1:0','-c:v','copy','-c:a','copy','-c:s','srt','-metadata:s:s:0','language=und','-metadata:s:s:0','handler_name=Subtitles','-disposition:s:0','default+forced','-y','output.mkv']);
     if(burnCancelled)throw new Error('Cancelled');
     setBurnProg(97,'Saving…');
-    const data=await ffmpeg.readFile('output.mkv');
+    const data=ffmpeg.FS('readFile','output.mkv');
     dlBlob(new Blob([data.buffer],{type:'video/x-matroska'}),getBaseName()+'_with_subs.mkv');
-    try{await ffmpeg.deleteFile(inputName);await ffmpeg.deleteFile('subs.srt');await ffmpeg.deleteFile('output.mkv');}catch(_){}
+    try{ffmpeg.FS('unlink',inputName);ffmpeg.FS('unlink','subs.srt');ffmpeg.FS('unlink','output.mkv');}catch(_){}
     setBurnProg(100,'Complete!');stopMemeCarousel();
     setTimeout(()=>{document.getElementById('burnModal').classList.remove('show');toast('✅ MKV downloaded! Subtitles embedded & toggleable in VLC.','ok')},1200);
   }catch(e){
@@ -1583,11 +1580,12 @@ function cancelVisualBurn(){
 async function renderVisualBurn(){
   try{
     setVisualProg(5,'Loading FFmpeg…');
-    const {FFmpeg:FFmpegClass}=FFmpegWASM;
-    const {fetchFile}=FFmpegUtil;
-    const ff=new FFmpegClass();
-    ff.on('log',({message})=>{
-      /* Progress from stderr */
+    const {createFFmpeg,fetchFile}=FFmpeg;
+    const ff=createFFmpeg({
+      log:false,
+      corePath:'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js',
+    });
+    ff.setLogger(({message})=>{
       const m=message.match(/time=(\d+):(\d+):([\d.]+)/);
       if(m&&dur>0){
         const t=parseInt(m[1])*3600+parseInt(m[2])*60+parseFloat(m[3]);
@@ -1603,10 +1601,7 @@ async function renderVisualBurn(){
         }
       }
     });
-    await ff.load({
-      coreURL:'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.js',
-      wasmURL:'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.wasm',
-    });
+    await ff.load();
     if(visualBurnCancelled)throw new Error('Cancelled');
 
     /* ── Probe video ── */
@@ -1694,8 +1689,8 @@ async function renderVisualBurn(){
     setVisualProg(22,'Writing to encoder…');
     const ext=videoFile.name.split('.').pop().toLowerCase()||'mp4';
     const inFile='input.'+ext;
-    await ff.writeFile(inFile,await fetchFile(videoFile));
-    await ff.writeFile('subs.ass',new TextEncoder().encode(assContent));
+    ff.FS('writeFile',inFile,await fetchFile(videoFile));
+    ff.FS('writeFile','subs.ass',new TextEncoder().encode(assContent));
     if(visualBurnCancelled)throw new Error('Cancelled');
 
     /* ── Build FFmpeg command ──
@@ -1765,14 +1760,14 @@ async function renderVisualBurn(){
       ];
     }
 
-    await ff.exec(ffArgs);
+    await ff.run(...ffArgs);
     if(visualBurnCancelled)throw new Error('Cancelled');
 
     setVisualProg(95,'Packaging…');
-    const data=await ff.readFile('output.mp4');
+    const data=ff.FS('readFile','output.mp4');
     const blob=new Blob([data.buffer],{type:'video/mp4'});
 
-    try{await ff.deleteFile(inFile);await ff.deleteFile('subs.ass');await ff.deleteFile('output.mp4');}catch(_){}
+    try{ff.FS('unlink',inFile);ff.FS('unlink','subs.ass');ff.FS('unlink','output.mp4');}catch(_){}
 
     const elapsed=((Date.now()-startEncode)/1000).toFixed(1);
     document.getElementById('bsFPS').textContent=outFPS;
