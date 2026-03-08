@@ -128,16 +128,15 @@ export default {
     newRes.headers.set('Cross-Origin-Embedder-Policy', 'require-corp');
     newRes.headers.set('Cross-Origin-Resource-Policy', 'cross-origin');
     newRes.headers.set('Access-Control-Allow-Origin', '*');
-    // Allow FFmpeg WASM scripts and workers from CDN sources
+    // Permissive CSP — allow CDN scripts, blob workers, eval (needed by FFmpeg WASM)
     newRes.headers.set('Content-Security-Policy',
-      "default-src 'self'; " +
-      "script-src 'self' 'unsafe-eval' https://cdn.jsdelivr.net https://unpkg.com https://fonts.googleapis.com; " +
-      "worker-src 'self' blob: https://cdn.jsdelivr.net https://unpkg.com; " +
-      "connect-src 'self' https://cdn.jsdelivr.net https://unpkg.com https://api.groq.com https://www.youtube.com https://fonts.googleapis.com https://fonts.gstatic.com; " +
-      "font-src 'self' https://fonts.gstatic.com; " +
-      "img-src 'self' data: blob:; " +
-      "media-src 'self' blob:; " +
-      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;"
+      "default-src * 'unsafe-inline' 'unsafe-eval' blob: data:; " +
+      "script-src * 'unsafe-inline' 'unsafe-eval' blob: data:; " +
+      "worker-src * blob: data:; " +
+      "connect-src *; " +
+      "img-src * data: blob:; " +
+      "media-src * blob: data:; " +
+      "font-src * data:;"
     );
     return newRes;
   }
