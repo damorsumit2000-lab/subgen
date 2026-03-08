@@ -1798,6 +1798,56 @@ function setVisualProg(pct,label){
   const ef=document.getElementById('encodeFillAnim');if(ef)ef.style.width=pct+'%';
   const el=document.getElementById('encodeFrameLabel');if(el)el.textContent=label;
 }
+/* ── PROGRESS HELPERS ── */
+function setGenProg(show, label, pct){
+  const wrap = document.getElementById('genAnimWrap');
+  const bar  = document.getElementById('genProgress');
+  const fill = document.getElementById('genFill');
+  const lbl  = document.getElementById('genLabel');
+  const txt  = document.getElementById('genStatusText');
+  const sub  = document.getElementById('genSubText');
+  if(show){
+    if(bar)  bar.style.display = '';
+    if(fill) fill.style.width  = (pct||0)+'%';
+    if(lbl)  lbl.textContent   = label||'';
+    if(wrap) wrap.classList.add('show');
+    if(txt && label){
+      const clean = label.replace(/….*/, '').replace(/\d+%.*/, '').trim();
+      txt.innerHTML = clean + '<span class="gen-dots"></span>';
+    }
+    if(sub && pct != null) sub.textContent = Math.round(pct)+'% complete';
+  } else {
+    if(bar)  bar.style.display = 'none';
+    if(wrap) wrap.classList.remove('show');
+  }
+}
+
+function setTransProg(show, label, pct){
+  const bar  = document.getElementById('transProgress');
+  const fill = document.getElementById('transFill');
+  const lbl  = document.getElementById('transLabel');
+  if(!bar) return;
+  bar.style.display = show ? '' : 'none';
+  if(show){
+    if(fill) fill.style.width = (pct||0)+'%';
+    if(lbl)  lbl.textContent  = label||'';
+  }
+}
+
+function setBurnProg(pct, label){
+  const fill = document.getElementById('burnFill');
+  const lbl  = document.getElementById('burnLabel');
+  if(fill) fill.style.width = pct+'%';
+  if(lbl)  lbl.textContent  = label||'';
+}
+
+function setGenProgBtn(running){
+  const btn = document.getElementById('genBtn');
+  if(!btn) return;
+  btn.disabled  = running;
+  btn.textContent = running ? 'Generating…' : 'Generate subtitles';
+}
+
 
 
 /* ── URL / YOUTUBE SUPPORT ── */
@@ -2132,58 +2182,6 @@ window.addEventListener('DOMContentLoaded',function(){
 })();
 });
 
-/* Patch: hook into generateSubtitles to show/hide waveform animation */
-const _origGenSubs = generateSubtitles;
-generateSubtitles = async function(){
-  const wrap = document.getElementById('genAnimWrap');
-  const genProgress = document.getElementById('genProgress');
-  const genBtn = document.getElementById('genBtn');
-  if(wrap) wrap.classList.add('show');
-  // patch setGenProg to update animation text
-  const _origStatus = document.getElementById('genStatusText');
-  await _origGenSubs.apply(this, arguments);
-  if(wrap) wrap.classList.remove('show');
-};
-
-/* New theme toggle (uses new button) */
-function updateThemeIcon(theme){
-  const icon = document.getElementById('themeIcon');
-  if(icon) icon.textContent = theme === 'dark' ? '☀︎' : '◑';
-  // hide old toggle if present
-  const old = document.getElementById('themeToggleBtn');
-  if(old) old.style.display = 'none';
-}
-
-/* Patch setGenProg to also drive waveform text */
-const _origSetGenProg = setGenProg;
-setGenProg = function(show, label, pct){
-  _origSetGenProg(show, label, pct);
-  const wrap = document.getElementById('genAnimWrap');
-  const txt = document.getElementById('genStatusText');
-  const sub = document.getElementById('genSubText');
-  if(!wrap) return;
-  if(show){
-    wrap.classList.add('show');
-    if(txt && label){
-      // Clean label for display
-      const clean = label.replace(/….*/, '').replace(/\d+%.*/, '').trim();
-      txt.innerHTML = clean + '<span class="gen-dots"></span>';
-    }
-    if(sub && pct !== undefined) sub.textContent = Math.round(pct) + '% complete';
-  } else {
-    wrap.classList.remove('show');
-  }
-};
-
-/* Patch prog-fill to add active class for shimmer */
-const _origFills = document.querySelectorAll('.prog-fill');
-const fillObserver = new MutationObserver(()=>{
-  document.querySelectorAll('.prog-fill').forEach(f=>{
-    const w = parseFloat(f.style.width)||0;
-    f.classList.toggle('active', w > 0 && w < 100);
-  });
-});
-document.querySelectorAll('.prog-fill').forEach(f => fillObserver.observe(f, {attributes:true, attributeFilter:['style']}));
 </script>
 </body>
 </html>
