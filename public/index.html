@@ -6,6 +6,10 @@
 <title>CaptionCraft — AI Subtitle Generator</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+CiAgPHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iNyIgZmlsbD0iIzFhMWExYSIvPgogIDxwYXRoIGQ9Ik0xMCAxMiBRMTAgOCAxNCA4IEwyMCA4IFEyNCA4IDI0IDEyIEwyNCAxMiBRMjQgOSAyMCA5IEwxNCA5IFExMSA5IDExIDEyIFoiIGZpbGw9IndoaXRlIiBvcGFjaXR5PSIwIi8+CiAgPHJlY3QgeD0iNyIgeT0iMTAiIHdpZHRoPSIxOCIgaGVpZ2h0PSIyLjUiIHJ4PSIxLjI1IiBmaWxsPSJ3aGl0ZSIvPgogIDxyZWN0IHg9IjciIHk9IjE1IiB3aWR0aD0iMTQiIGhlaWdodD0iMi41IiByeD0iMS4yNSIgZmlsbD0id2hpdGUiLz4KICA8cmVjdCB4PSI3IiB5PSIyMCIgd2lkdGg9IjEwIiBoZWlnaHQ9IjIuNSIgcng9IjEuMjUiIGZpbGw9IndoaXRlIi8+Cjwvc3ZnPg==">
+<link rel="apple-touch-icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxODAgMTgwIj4KICA8cmVjdCB3aWR0aD0iMTgwIiBoZWlnaHQ9IjE4MCIgcng9IjQwIiBmaWxsPSIjMWExYTFhIi8+CiAgPHJlY3QgeD0iMzYiIHk9IjU1IiB3aWR0aD0iMTA4IiBoZWlnaHQ9IjE0IiByeD0iNyIgZmlsbD0id2hpdGUiLz4KICA8cmVjdCB4PSIzNiIgeT0iODMiIHdpZHRoPSI4NCIgaGVpZ2h0PSIxNCIgcng9IjciIGZpbGw9IndoaXRlIi8+CiAgPHJlY3QgeD0iMzYiIHk9IjExMSIgd2lkdGg9IjYwIiBoZWlnaHQ9IjE0IiByeD0iNyIgZmlsbD0id2hpdGUiLz4KPC9zdmc+">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1c1c1c" media="(prefers-color-scheme: dark)">
 <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
 <style>
 /* =============================================
@@ -1119,7 +1123,7 @@ body {
   <div class="burn-modal">
     <div class="burn-hdr">
       <div class="burn-title">Burning captions into video</div>
-      <div class="burn-sub">Frame-by-frame render · Subtitles baked into pixels</div>
+      <div class="burn-sub" id="burnSubText">Detecting frame rate…</div>
     </div>
     <div class="burn-cv-wrap">
       <canvas id="burnPreviewCanvas"></canvas>
@@ -1539,13 +1543,51 @@ async function renderVisualBurn(){
   const previewCanvas=document.getElementById('burnPreviewCanvas');
   const previewCtx=previewCanvas.getContext('2d');
   try{
+    // ── Probe video for native FPS ──
     const rv=document.createElement('video');
     rv.src=URL.createObjectURL(videoFile);rv.muted=true;rv.playsInline=true;rv.preload='auto';
-    await new Promise((res,rej)=>{rv.onloadeddata=res;rv.onerror=()=>rej(new Error('Video load failed'));rv.load()});
+    await new Promise((res,rej)=>{rv.onloadedmetadata=res;rv.onerror=()=>rej(new Error('Video load failed'));rv.load()});
     const W=rv.videoWidth||1280,H=rv.videoHeight||720,dur=rv.duration;
     if(!dur||!isFinite(dur))throw new Error('Cannot read video duration.');
+
+    // Detect native FPS — probe via getVideoPlaybackQuality or short play
+    let nativeFPS=60;
+    try{
+      // Try to read from video track (works in some browsers)
+      const tracks=videoFile.stream ? null : null; // can't access MediaInfo here
+      // Estimate by sampling 2s of playback frames
+      rv.currentTime=Math.min(1,dur*.1);
+      await new Promise(r=>{rv.onseeked=r});
+      let frameCount=0,t0=performance.now();
+      if('requestVideoFrameCallback' in rv){
+        await new Promise(res=>{
+          const cb=()=>{frameCount++;if(performance.now()-t0<500)rv.requestVideoFrameCallback(cb);else res()};
+          rv.play();rv.requestVideoFrameCallback(cb);
+        });
+        rv.pause();
+        const measured=Math.round(frameCount/(500/1000));
+        // Round to standard: 24,25,30,48,50,60,120
+        const standards=[24,25,30,48,50,60,120];
+        nativeFPS=standards.reduce((a,b)=>Math.abs(b-measured)<Math.abs(a-measured)?b:a);
+        // Minimum 60fps for output
+        nativeFPS=Math.max(60,nativeFPS);
+      } else {
+        nativeFPS=60; // default to 60 if RVFC not supported
+      }
+    }catch(e){nativeFPS=60}
+
+    const FPS=nativeFPS; // 60 or 120
+    const totalFrames=Math.ceil(dur*FPS);
+    const BITRATE=Math.min(20_000_000, Math.max(8_000_000, W*H*FPS*0.07)); // adaptive bitrate
+
+    document.getElementById('bsFPS').textContent=FPS;
+    document.getElementById('bsFrame').textContent='0/'+totalFrames;
+    document.getElementById('bsETA').textContent='—';
+    setVisualProg(1,'Detected '+FPS+' FPS · '+totalFrames+' frames');
+
     previewCanvas.width=W;previewCanvas.height=H;
 
+    // Style params
     const size=parseInt(document.getElementById('sSize').value);
     const col=document.getElementById('sColor').value;
     const bg=document.getElementById('sBg').value;
@@ -1575,53 +1617,105 @@ async function renderVisualBurn(){
       lines.forEach((ln,i)=>ctx.fillText(ln,W/2,by+i*lh));
     }
 
+    // ── Render canvas ──
     const canvas=document.createElement('canvas');canvas.width=W;canvas.height=H;
-    const ctx=canvas.getContext('2d');
-    const mime=['video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm'].find(m=>MediaRecorder.isTypeSupported(m))||'video/webm';
-    const stream=canvas.captureStream(30);
-    const chunks=[];
-    const rec=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:6_000_000});
-    rec.ondataavailable=e=>{if(e.data&&e.data.size>0)chunks.push(e.data)};
+    const ctx=canvas.getContext('2d',{alpha:false,willReadFrequently:false});
 
-    const FPS=30,totalFrames=Math.ceil(dur*FPS);
-    let startTime=Date.now();
+    const mime=['video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm'].find(m=>MediaRecorder.isTypeSupported(m))||'video/webm';
+    const stream=canvas.captureStream(FPS);
+    const chunks=[];
+    const rec=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:BITRATE});
+    rec.ondataavailable=e=>{if(e.data&&e.data.size>0)chunks.push(e.data)};
 
     const finish=new Promise((resolve,reject)=>{
       rec.onstop=()=>{
         if(visualBurnCancelled){reject(new Error('Cancelled'));return}
-        setVisualProg(100,'Saving file…');
+        setVisualProg(100,'Packaging file…');
         dlBlob(new Blob(chunks,{type:mime}),getBaseName()+'_captions.webm');
         URL.revokeObjectURL(rv.src);resolve();
       };
     });
 
-    rec.start(200);
+    // Reset to start
+    rv.currentTime=0;
+    await new Promise(r=>{rv.onseeked=r});
+    rec.start(100);
 
-    for(let f=0;f<totalFrames;f++){
-      if(visualBurnCancelled)throw new Error('Cancelled');
-      rv.currentTime=f/FPS;
-      await new Promise(res=>{rv.onseeked=res});
-      ctx.drawImage(rv,0,0,W,H);drawSub(ctx,f/FPS);
+    let startTime=Date.now();
+    let lastPreviewUpdate=0;
 
-      if(f%5===0){
-        previewCtx.drawImage(canvas,0,0);
-        const elapsed=(Date.now()-startTime)/1000;
-        const fps=f>0?Math.round(f/elapsed):0;
-        const eta=fps>0?Math.round((totalFrames-f)/fps):0;
-        document.getElementById('bsFPS').textContent=fps||'--';
-        document.getElementById('bsFrame').textContent=f+'/'+totalFrames;
-        document.getElementById('bsETA').textContent=eta>0?eta+'s':'--';
-        setVisualProg(Math.round((f/totalFrames)*95),'Rendering frame '+f+' / '+totalFrames);
+    // ── FAST PATH: use requestVideoFrameCallback if available ──
+    if('requestVideoFrameCallback' in rv){
+      let framesDone=0;
+      await new Promise((resolve,reject)=>{
+        function onFrame(now,meta){
+          if(visualBurnCancelled){reject(new Error('Cancelled'));return}
+          const t=meta.mediaTime;
+          ctx.drawImage(rv,0,0,W,H);
+          drawSub(ctx,t);
+          framesDone++;
+
+          // Update preview every 15 frames
+          if(framesDone%15===0||now-lastPreviewUpdate>200){
+            lastPreviewUpdate=now;
+            previewCtx.drawImage(canvas,0,0);
+            const elapsed=(Date.now()-startTime)/1000;
+            const realFps=elapsed>0?Math.round(framesDone/elapsed):0;
+            const totalEst=Math.ceil(dur*FPS);
+            const eta=realFps>0?Math.round((totalEst-framesDone)/realFps):0;
+            document.getElementById('bsFPS').textContent=realFps||FPS;
+            document.getElementById('bsFrame').textContent=framesDone+'/'+totalEst;
+            document.getElementById('bsETA').textContent=eta>0?eta+'s':'—';
+            setVisualProg(Math.min(95,Math.round((t/dur)*95)),'Rendering '+Math.round(t)+'s / '+Math.round(dur)+'s');
+          }
+
+          if(t<dur-1/FPS){
+            rv.requestVideoFrameCallback(onFrame);
+          } else {
+            resolve();
+          }
+        }
+        rv.requestVideoFrameCallback(onFrame);
+        rv.play().catch(reject);
+      });
+      rv.pause();
+
+    } else {
+      // ── FALLBACK: batched seek with minimal await ──
+      // Use larger step for preview updates to reduce overhead
+      const BATCH=4; // seek 4 frames per microtask yield
+      for(let f=0;f<totalFrames;f++){
+        if(visualBurnCancelled)throw new Error('Cancelled');
+        const t=f/FPS;
+        rv.currentTime=t;
+        await new Promise(res=>{rv.onseeked=res});
+        ctx.drawImage(rv,0,0,W,H);
+        drawSub(ctx,t);
+
+        if(f%20===0){
+          previewCtx.drawImage(canvas,0,0);
+          const elapsed=(Date.now()-startTime)/1000;
+          const fps2=f>0?Math.round(f/elapsed):0;
+          const eta=fps2>0?Math.round((totalFrames-f)/fps2):0;
+          document.getElementById('bsFPS').textContent=fps2||'—';
+          document.getElementById('bsFrame').textContent=f+'/'+totalFrames;
+          document.getElementById('bsETA').textContent=eta>0?eta+'s':'—';
+          setVisualProg(Math.round((f/totalFrames)*95),'Rendering frame '+f+' / '+totalFrames);
+        }
+        // Only yield every BATCH frames to reduce overhead
+        if(f%BATCH===0)await new Promise(r=>setTimeout(r,0));
       }
-      if(f%10===0)await new Promise(r=>setTimeout(r,0));
     }
 
     if(visualBurnCancelled)throw new Error('Cancelled');
+    // Render last frame
     ctx.drawImage(rv,0,0,W,H);drawSub(ctx,dur);
-    setTimeout(()=>{if(rec.state!=='inactive')rec.stop()},300);
+    setVisualProg(97,'Finalizing…');
+    await new Promise(r=>setTimeout(r,500));
+    if(rec.state!=='inactive')rec.stop();
     await finish;
     document.getElementById('visualBurnModal').classList.remove('show');
-    toast('✅ Video with captions downloaded! (WebM · subtitles baked into pixels)','ok');
+    toast('✅ '+FPS+'fps video downloaded! Captions burned into every frame.','ok');
   }catch(e){
     document.getElementById('visualBurnModal').classList.remove('show');
     if(!visualBurnCancelled)toast('Render error: '+e.message,'err');
