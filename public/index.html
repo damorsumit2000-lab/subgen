@@ -1555,28 +1555,43 @@ async function muxSubsIntoVideo(){
 }
 
 /* ── VISUAL BURN-IN (captions baked into pixels) ── */
-/* ── FFmpeg lazy loader ── */
+/* ── FFmpeg lazy loader — multi-CDN fallback ── */
 let _ffmpegLoaded = false;
-async function loadFFmpegScript(){
-  if(window.FFmpeg && window.FFmpeg.createFFmpeg) return; // already loaded
-  if(_ffmpegLoaded) return;
+const FFMPEG_CDNS = [
+  'https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js',
+  'https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js',
+  'https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.11.0/dist/ffmpeg.min.js',
+];
+function tryLoadScript(url){
   return new Promise((resolve, reject)=>{
+    // If already loaded by a previous attempt, resolve immediately
+    if(window.FFmpeg && window.FFmpeg.createFFmpeg){ resolve(); return; }
     const s = document.createElement('script');
-    s.src = 'https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js';
-    s.onload = ()=>{ _ffmpegLoaded=true; resolve(); };
-    s.onerror = ()=> reject(new Error('Failed to load FFmpeg. Check your internet connection.'));
+    s.src = url;
+    const timer = setTimeout(()=>{ s.remove(); reject(new Error('timeout')); }, 15000);
+    s.onload = ()=>{ clearTimeout(timer); _ffmpegLoaded=true; resolve(); };
+    s.onerror = ()=>{ clearTimeout(timer); s.remove(); reject(new Error('load error')); };
     document.head.appendChild(s);
   });
 }
+async function loadFFmpegScript(){
+  if(window.FFmpeg && window.FFmpeg.createFFmpeg) return;
+  if(_ffmpegLoaded) return;
+  let lastErr;
+  for(const url of FFMPEG_CDNS){
+    try{ await tryLoadScript(url); return; }
+    catch(e){ lastErr=e; console.warn('FFmpeg CDN failed:', url, e.message); }
+  }
+  throw new Error('Could not load video processor from any source. Check your connection.');
+}
 async function makeFFmpeg(){
   await loadFFmpegScript();
-  // 0.11 UMD exposes either window.FFmpeg or window.FFmpeg.FFmpeg
   const mod = (window.FFmpeg && window.FFmpeg.createFFmpeg)
     ? window.FFmpeg
     : (window.FFmpeg && window.FFmpeg.FFmpeg)
     ? window.FFmpeg.FFmpeg
     : null;
-  if(!mod) throw new Error('FFmpeg WASM unavailable — try reloading the page.');
+  if(!mod) throw new Error('Video processor unavailable — try reloading the page.');
   return mod;
 }
 
